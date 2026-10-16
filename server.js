@@ -28,6 +28,7 @@ import crm from './sources/crm.js';
 import crmRules from './rules/crm.js';
 import { TwentyApi } from './lib/twenty-api.js';
 import { existsSync } from 'node:fs';
+import { sameLogin } from './lib/util.js';
 
 const log = (m) => console.error(`${new Date().toISOString()} triage: ${m}`);
 const cfg = loadConfig();
@@ -51,7 +52,14 @@ async function forge(name, source, c, Api, tokenOf, apiOpts = {}) {
   const api = new Api({ base: c.base, token, ...apiOpts });
   let me;
   try { me = await source.whoami({ api, user: c.user }); }
-  catch (e) { log(`${name}: cannot resolve who you are (${e.message}); set ${NAME}_USER`); process.exit(1); }
+  catch (e) {
+    // A forge that is merely available — not insisted on — must not stop
+    // the box: a stale `glab` token for the wrong instance, or an outage
+    // at boot, is that forge off until the next restart, said out loud.
+    log(`${name}: off — cannot resolve who you are at ${api.base} (${e.message}); set ${NAME}_USER${c.mode === 'on' ? '' : `, or TRIAGE_${NAME}=off`}`);
+    if (c.mode === 'on') process.exit(1);
+    return null;
+  }
   const watched = c.issues.repos || c.issues.projects || [];
   sources.push(source);
   extras[name] = { api, all: c.all, issues: c.issues };
@@ -66,10 +74,11 @@ async function forge(name, source, c, Api, tokenOf, apiOpts = {}) {
 await forge('github', github, cfg.github, GitHubApi, githubToken, { tokensDir: cfg.github.tokensDir });
 await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken);
 // The one person the items belong to: `items.user`, which scopes every
-// read. Their GitHub login when GitHub is on, else their GitLab username.
-// Switching which forge is first on an existing store changes this and
-// orphans the rows under the old name — a documented trap, not a feature.
-const user = identity.github ?? identity.gitlab ?? null;
+// read. Whoever the store already files items under, so that adding a
+// forge later never re-keys a queue; on an empty store, the GitHub login
+// when GitHub is on, else the GitLab username.
+const user = store.firstUser() ?? identity.github ?? identity.gitlab ?? null;
+if (user && Object.values(identity).length && !Object.values(identity).some((me) => sameLogin(me, user))) log(`items belong to ${user} (the store's), which is none of this boot's identities (${Object.entries(identity).map(([k, v]) => `${k}: ${v}`).join(', ')}) — set TRIAGE_DB to start a queue of your own`);
 
 // M3: the second source. It registers only when it can actually read a
 // calendar — a Google OAuth client and a refresh token are ring-0 work

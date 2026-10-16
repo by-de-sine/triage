@@ -35,6 +35,20 @@ test('GitHub: bearer auth, the api version header, and a web base that pairs wit
   assert.equal(ghe.ownerOf('https://api.github.com/repos/acme/widgets'), null, 'another host is not this base');
 });
 
+test('the token goes only where the base does: another origin gets the request bare', async () => {
+  const r = recorder([[]]);
+  const api = new GitHubApi({ token: 'tok', tokensDir: '/nonexistent', fetch: r.fetch });
+  await api.get('https://api.github.com/repos/o/r/issues');
+  assert.equal(r.calls[0].headers.authorization, 'Bearer tok');
+  await api.get('https://evil.example.com/repos/o/r/issues');
+  assert.equal(r.calls[1].headers.authorization, undefined);
+  const gl = new GitLabApi({ token: 'glpat', fetch: r.fetch });
+  await gl.get('https://gitlab.com/api/v4/user');
+  assert.equal(r.calls[2].headers['PRIVATE-TOKEN'], 'glpat');
+  await gl.get('https://gitlab.example.com/api/v4/user');
+  assert.equal(r.calls[3].headers['PRIVATE-TOKEN'], undefined);
+});
+
 test('GitHub: a per-owner token is a file, or a gh config directory asked through gh', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-tokens-'));
   fs.writeFileSync(path.join(dir, 'acme'), '# the owner\nghp_acme\n');

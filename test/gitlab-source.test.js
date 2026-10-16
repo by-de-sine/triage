@@ -56,6 +56,26 @@ test('todos are the inbox, my threads fill in the rest, discussions become the n
   assert.equal(disc, 2);
 });
 
+test('a merge request of yours that was merged is read, and the rules call it news', async () => {
+  const w = world();
+  const merged = mr({ path: P, iid: 12, title: 'Shipped', author: ME, created_at: '2026-08-20T00:00:00Z', updated_at: '2026-09-01T05:00:00Z', state: 'merged', merged_at: '2026-09-01T05:00:00Z' });
+  merged.merged_by = { username: 'carol' };
+  w.routes['/merge_requests'] = (u) => (u.searchParams.get('author_username') === ME ? [w.m9, merged] : u.searchParams.get('reviewer_username') === ME ? [w.m7] : []);
+  w.routes[`/projects/${P}/merge_requests/12/discussions`] = [];
+  const api = fakeApi(w.routes);
+  const r = await gitlab.poll({ api, cursor: null, me: ME, now: NOW });
+  assert.ok(api.calls.some((c) => c.includes('/merge_requests?') && !c.includes('state=')), 'my threads are read whatever their state');
+  const b = r.batches.find((x) => x.item.key === `${P}!12`);
+  assert.equal(b.item.data.state, 'merged');
+  assert.deepEqual(b.events.map((e) => e.kind), ['opened', 'state']);
+  assert.equal(b.events[1].actor, 'carol');
+  const store = new Store();
+  const runner = new Runner(store, [gitlab], { user: ME, rules: { gitlab: rules }, identity: { gitlab: ME }, extras: { gitlab: { api } }, now: () => NOW });
+  const run = await runner.run('gitlab');
+  assert.equal(run.decisions.find((d) => d.item === `${P}!12`).rule, 'state_change_on_mine');
+  store.close();
+});
+
 test('system notes: the ones that are observations, and only for you', () => {
   assert.deepEqual(systemNote('approved this merge request', ME), { kind: 'review', data: { state: 'approved' } });
   assert.deepEqual(systemNote('merged', ME), { kind: 'state', data: { state: 'merged' } });

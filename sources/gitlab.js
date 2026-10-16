@@ -73,11 +73,15 @@ export default {
     }
     for (const [id, seen] of Object.entries(todos)) if (now - Date.parse(seen) > CURSOR_TTL_MS) delete todos[id];
 
-    // 2. My threads, updated since the cursor (with a minute of overlap).
+    // 2. My threads, updated since the cursor (with a minute of overlap),
+    //    whatever their state.
     const since = prev.since ? new Date(Date.parse(prev.since) - 60_000).toISOString() : new Date(now.getTime() - FIRST_LOOKBACK_MS).toISOString();
     const mine = [];
-    for (const who of ['author_username', 'reviewer_username', 'assignee_username']) mine.push(...(await api.list('/merge_requests', { params: { scope: 'all', state: 'opened', [who]: me, updated_after: since, order_by: 'updated_at', sort: 'asc' }, pages: 3 })).map((t) => ({ target: t, kind: 'pull' })));
-    for (const who of ['assignee_username', 'author_username']) mine.push(...(await api.list('/issues', { params: { scope: 'all', state: 'opened', [who]: me, updated_after: since, order_by: 'updated_at', sort: 'asc' }, pages: 3 })).map((t) => ({ target: t, kind: 'issue' })));
+    // No state filter: a merge or a close is exactly the change these reads
+    // exist to see, since GitLab writes no todo for either, and
+    // `updated_after` keeps the read small.
+    for (const who of ['author_username', 'reviewer_username', 'assignee_username']) mine.push(...(await api.list('/merge_requests', { params: { scope: 'all', [who]: me, updated_after: since, order_by: 'updated_at', sort: 'asc' }, pages: 3 })).map((t) => ({ target: t, kind: 'pull' })));
+    for (const who of ['assignee_username', 'author_username']) mine.push(...(await api.list('/issues', { params: { scope: 'all', [who]: me, updated_after: since, order_by: 'updated_at', sort: 'asc' }, pages: 3 })).map((t) => ({ target: t, kind: 'issue' })));
     for (const { target, kind } of mine) {
       const path = target.references?.full?.replace(/[!#]\d+$/, '') || pathOf(target);
       if (!path) continue;

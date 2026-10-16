@@ -26,6 +26,7 @@ test('upsert creates once and refreshes without touching tier or state', () => {
   assert.equal(b.item.state, 'snoozed');
   assert.equal(b.item.state_until, '2026-09-02T00:00:00Z');
   assert.equal(s.itemByKey('alice', 'github', 'octo/repo#1').id, a.item.id);
+  assert.equal(s.firstUser(), 'alice', 'whose queue this is, from the rows themselves');
   s.close();
 });
 
