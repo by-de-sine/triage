@@ -281,15 +281,21 @@ One process, one SQLite file, four seams:
   and `reason` on the decision row.
   `match(item, fresh, { me, history, now })` returns a reason or null. Every
   verdict is a row in `decisions` with the rule's name, P3 included.
-- **Delivery** — `deliver/slack.js`, through one of two clients that
-  `TRIAGE_SLACK` picks. `webhook` is `deliver/webhook.js`: one incoming
-  webhook URL, one message per interrupt to the channel it was created
-  for, and — once `TRIAGE_MENTION` says who — **it names you**, because
-  a channel message that mentions nobody is an unread badge and not a push
-  under Slack's default preferences, which is how the first real P0 this
-  system sent arrived and reached nobody (plan §14.1). `app` is Bolt in
-  Socket Mode, so Slack never needs to reach this box, and it is the only
-  one with buttons, `/triage` and a Home tab. Everything below is written for the app; under `webhook`
+- **Delivery** — `deliver/slack.js`, in two halves that `TRIAGE_SLACK`
+  picks between. **The webhook half** (`webhook`; plan §16, G2) is
+  `deliver/notify.js`: one URL, one message per interrupt, in one of three
+  shapes from `deliver/messages.js` that `TRIAGE_NOTIFY` names — `slack`
+  (an incoming webhook: the app's own message without the act buttons, so
+  the two cannot drift apart), `discord` (a channel webhook, one markdown
+  message) or `generic` (any endpoint that takes JSON: the text and the
+  structure both). Unset, the shape is inferred from the URL's host. Once
+  `TRIAGE_MENTION` says who, **it names you**, in that endpoint's grammar,
+  because a channel message that mentions nobody is an unread badge and
+  not a push under Slack's and Discord's default preferences, which is how
+  the first real P0 this system sent arrived and reached nobody (plan
+  §14.1). **The app half** (`app`) is Bolt in Socket Mode, so Slack never
+  needs to reach this box, and it is the only one with buttons, `/triage`
+  and a Home tab — and the direction output grows in (plan §16.5). Everything below is written for the app; under `webhook`
   the message is the same **without the act buttons** — nothing delivers a
   press, so Done · Snooze · Later · Mute are not rendered at all, and Open
   (with a meeting's Join) stays on the line beneath as a link. One DM per interrupt: title, repo,
@@ -621,7 +627,7 @@ server on the webhook boot with no `node_modules` at all. GitHub, GitLab,
 Google and Twenty are stdlib `fetch` and no dependency.
 
 ```bash
-npm test                       # node --test, in-memory store, fake GitHub, GitLab, Slack, calendar, Home Assistant and Twenty
+npm test                       # node --test, in-memory store, fake GitHub, GitLab, Slack, a webhook, calendar, Home Assistant and Twenty
 node server.js                 # 127.0.0.1:3300 — the page is at /
 node bin/google-consent.js     # once, by hand: the Google consent that mints the refresh token
 node bin/replay.js o/r#123     # what the rules would have said, step by step (group/project!12 on GitLab)
@@ -643,8 +649,9 @@ read from the repo.
 | `TRIAGE_GITLAB` | unset | `on` · `off`, exactly as `TRIAGE_GITHUB` |
 | `TRIAGE_GITLAB_URL` | `https://gitlab.com` | the instance; the API is `/api/v4` under it |
 | `TRIAGE_GITLAB_ISSUES` | — | projects whose **open issues** are read as state and reconciled, `group/project` comma-separated (a path may nest; a URL is accepted; a bad entry is refused at boot) |
-| `TRIAGE_SLACK` | unset | `webhook` · `app` · `off`. Unset means **infer from what is configured** — `webhook` if `SLACK_WEBHOOK_URL` is set, `app` if `SLACK_BOT_TOKEN` is, `off` otherwise; with both set the webhook wins and `app` says otherwise. A mode it does not recognise is refused at boot, as `TRIAGE_CALENDAR` is: a typo must not read as the default |
-| `SLACK_WEBHOOK_URL` | — | an incoming webhook (plan §11.6). One message per interrupt to the channel it was created for; no DM, no buttons, no redraw, no Home tab. **Point it at a channel you are alone in** — a DM to `SLACK_USER_ID` was private by construction and this is not, and what goes through it is a thread title, a repo name and a line of a comment, from private repositories. Nothing in the code can check where a webhook points. The URL *is* the credential: it carries no scopes, cannot be narrowed, and is never logged, stored or returned by the API — only its host is. Must be `https`, except on loopback — plain `http://127.0.0.1:…` is allowed because that is how a worktree proves delivery against a listener of its own. A post is abandoned after ten seconds and never retried: `deliver()` is awaited by the poll, and an ambiguous POST may well have arrived |
+| `TRIAGE_SLACK` | unset | `webhook` · `app` · `off`. Unset means **infer from what is configured** — `webhook` if a webhook URL is set (and `TRIAGE_NOTIFY` is not `off`), `app` if `SLACK_BOT_TOKEN` is, `off` otherwise; with both set the webhook wins and `app` says otherwise. A mode it does not recognise is refused at boot, as `TRIAGE_CALENDAR` is: a typo must not read as the default |
+| `TRIAGE_NOTIFY` | inferred | the webhook's shape (plan §16, G2): `slack` · `discord` · `generic` · `off`. Unset is inferred from `TRIAGE_WEBHOOK_URL`'s host — `hooks.slack.com` is Slack, `discord.com` is Discord, anything else is generic JSON — and `off` with no URL. `off` turns the webhook half off whatever the URL says. A shape it does not recognise is refused at boot |
+| `TRIAGE_WEBHOOK_URL` | — | the webhook: a Slack incoming webhook (plan §11.6), a Discord channel webhook, or any endpoint that takes a JSON POST. One message per interrupt to the channel it was created for; no DM, no buttons, no redraw, no Home tab. **`SLACK_WEBHOOK_URL` is read as an alias** — the name it had when Slack was the only shape — so a `.env` written then goes on working. **Point it at a channel you are alone in** — a DM to `SLACK_USER_ID` was private by construction and this is not, and what goes through it is a thread title, a repo name and a line of a comment, from private repositories. Nothing in the code can check where a webhook points. The URL *is* the credential: it carries no scopes, cannot be narrowed, and is never logged, stored or returned by the API — only its host is. Must be `https`, except on loopback — plain `http://127.0.0.1:…` is allowed because that is how a worktree proves delivery against a listener of its own. A post is abandoned after ten seconds and never retried: `deliver()` is awaited by the poll, and an ambiguous POST may well have arrived |
 | `SLACK_BOT_TOKEN` · `SLACK_APP_TOKEN` · `SLACK_USER_ID` | — | the `app` path, superseded by the webhook but not deleted, and **read by nothing else**: the webhook path's mention is `TRIAGE_MENTION`, so these three stay app-only and a box on the webhook leaves all of them unset. Without the first and last, delivery is off and every interrupt is logged as not delivered; without the app token there is no Socket Mode, so DMs go out but no button, `/triage` or Home tab answers |
 | `TRIAGE_QUIET` | `23:00-07:00` | local quiet window; empty disables. Interrupts are held and sent when it ends |
 | `TRIAGE_TZ` | the system zone | |
@@ -674,7 +681,7 @@ read from the repo.
 | `TRIAGE_CRM_STALE_MIN` | `30` | how long without a **complete** read before that is a P0 (`crm_unread`). One alarm per outage, resolved by the next complete read. Before any read has completed the clock starts at boot. `0` turns the alarm off |
 | `TRIAGE_INTERRUPT` | unset | which rules may fire Slack, and where — `[+\|-]source:rule[@project]`, comma-separated (M5 plan §11.6; layered by §14). The top layer: it wins over the preferences file, because typing it is what "silence this now" means. Unset is whatever the layers beneath resolve to; an unsigned list still *replaces* the whole set, as it always has; `off` interrupts on nothing; a source named with no rules of its own interrupts on none, which is how a noisy new source is muted |
 | `TRIAGE_PREFS` | `<envFile dir>/preferences.json` | the preferences file (plan §14.4): what interrupts you globally and per project, and what each project is worth. Beside the `.env`, as `GOOGLE_CLIENT_FILE` is — and gitignored for the same reason, since in a worktree that directory is the checkout. Absent is the normal case and means the built-in set. **Malformed is a boot failure** — a typo read as "no preferences" is the bug you discover by not being interrupted |
-| `TRIAGE_MENTION` | unset — **nobody is named, so nothing pushes** | who an interrupt names in `webhook` mode, so Slack *notifies* rather than badges (plan §14.1). **The one line that turns the interrupt path from delivered into arrived.** A user id (`U…`/`W…`), a user group (`S…`), `!here`, `!channel`, or those same forms in Slack's `<…>` markup; anything else is refused at boot, and `off` says "nobody" on purpose. It does **not** fall back to `SLACK_USER_ID`, which belongs to the `app` path. Ignored under `app`, where a DM notifies on its own |
+| `TRIAGE_MENTION` | unset — **nobody is named, so nothing pushes** | who an interrupt names in `webhook` mode, so the channel *notifies* rather than badges (plan §14.1). **The one line that turns the interrupt path from delivered into arrived.** In the grammar of the shape it goes to: on Slack a user id (`U…`/`W…`), a user group (`S…`), `!here`, `!channel`, or those same forms in Slack's `<…>` markup; on Discord a user id (bare digits or `<@id>`), a role (`<@&id>`), `@here` or `@everyone`; on a generic endpoint any text, passed through in the payload's `mention`. A Slack or Discord form it does not recognise is refused at boot — a bare name would render as a word and notify nobody — and `off` says "nobody" on purpose. It does **not** fall back to `SLACK_USER_ID`, which belongs to the `app` path. Ignored under `app`, where a DM notifies on its own |
 | `TRIAGE_RANK_W_CLAIM` · `TRIAGE_RANK_W_TIME` · `TRIAGE_RANK_W_PREFER` | `1` · `0.6` · `0.4` | the weights of the blend. Plan §13.3 puts them in config on purpose: a deterministic function combines the features, and nothing else produces the order |
 | `TRIAGE_RANK_W_RELEVANCE` · `TRIAGE_RANK_W_EFFORT` | `0` | declared and **absent**: they were the model's two features and nothing computes them (plan §13.4), so a weight here does nothing — which is the point of absence not being zero |
 | `TRIAGE_RANK_PREFER` | — | stated preference as structure: `repo:owner/name=0.8, source:calendar=0.3, actor:login=0.5, kind:pull=0.2`, weights −1…1. A bare `owner/name` is a repo. Empty means the term is absent rather than a flat half |
@@ -682,8 +689,10 @@ read from the repo.
 | `TRIAGE_RANK_HYSTERESIS` | `0.02` | how far a read-time rank must move before the list is allowed to reorder |
 | `TRIAGE_RANK_BACKFILL` | `500` | how many unranked items the one bootstrap pass takes at boot; `0` disables it |
 
-A webhook is created in Slack's UI and is one line in the `.env`; nothing
-in this repo configures it. The Slack **app** — only needed for
+A webhook is created in Slack's or Discord's UI and is one line in the
+`.env`; nothing in this repo configures it. A generic endpoint is whatever
+takes a JSON POST — the payload is `text`, `mention`, `item`, `decision`
+and `event`, and a script on the far end does what it likes with them. The Slack **app** — only needed for
 `TRIAGE_SLACK=app`, and so for buttons, `/triage` and the Home tab — is
 created from `slack/manifest.yml` (the comments there say which token is
 which). Where it runs the service is one user systemd unit behind a

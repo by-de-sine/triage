@@ -10,7 +10,7 @@ is not repeated here; read it first. This file is how to *work on* it.
 server.js        boot: config, store, the forge clients (GitHub, GitLab — each registers when its token resolves, and says who you are there), the Google client, Slack, the runner, the API
 sources/         one file per source: github.js, gitlab.js, calendar.js, ledger.js, ha.js, crm.js — poll(ctx) → batches + cursor; due(ctx) for the clock's half; reconcile(ctx) for the state half (github.js, gitlab.js and crm.js have both: a forge's inbox is a feed and the open issues of TRIAGE_GITHUB_ISSUES / TRIAGE_GITLAB_ISSUES are state; the CRM's open tasks are state and anybody else's edit is an event; ledger.js and ha.js are state throughout); whoami(ctx) and mark(item, ctx) on the forges
 rules/           thread.js (both forges: a reply on GitLab is the same observation as one on GitHub), calendar.js, ledger.js, ha.js, crm.js — ordered, named, every match returned; each rule declares its `claim`
-deliver/         slack.js (the windows, the guards, the answer on every decision), webhook.js (TRIAGE_SLACK=webhook: one incoming webhook URL, post only), blocks.js (pure; item.kind picks the shape), handlers.js (TRIAGE_SLACK=app only: buttons, /triage, Home), interrupts.js (M5 + §14: which rules, per source, for which project, may fire Slack — four layers resolved into one statement list)
+deliver/         slack.js (the windows, the guards, the answer on every decision — the same for both halves), notify.js (the webhook half, TRIAGE_SLACK=webhook: one URL, one post, the mention grammar per endpoint), messages.js (pure; the three shapes TRIAGE_NOTIFY picks — slack, discord, generic — each drawn by item.kind), blocks.js (pure; the app's message and views, and the slack shape's source), handlers.js (TRIAGE_SLACK=app only: buttons, /triage, Home), interrupts.js (M5 + §14: which rules, per source, for which project, may fire Slack — four layers resolved into one statement list)
 lib/             store.js (node:sqlite), runner.js, pipeline.js, rules.js, actions.js, lists.js, api.js, config.js, forge-api.js (one RestApi; GitHubApi with a token per owner, GitLabApi), forge.js (what the forge sources share: the news set, the time curve, the repository-list parser), google-api.js, ha-api.js, twenty-api.js (GraphQL, read-only), util.js, rank.js (M5: the score, which is the product), backfill.js (M5: the one bounded pass that gives the backlog a rank), aggregates.js (§13.6: the queue as counts, for a program), reports.js (§15: the queue over time — named reports over one bounded read, for the stats page and for a program)
 public/          the list page (index.html, app.js) and the stats page (stats.html, stats.js): static, no build, one stylesheet
 bin/replay.js    run the rules over one real thread, on either forge, step by step, writing nothing
@@ -264,12 +264,13 @@ A worktree proves a change through the page and the API — `GET
 /api/decisions` shows what would have been sent and why, `POST
 /api/items/:id/act` exercises the one action path, and the buttons on the
 page do the same — and, for delivery itself, **against a local listener it
-starts, never against `hooks.slack.com`**. `TRIAGE_SLACK=webhook` with
-`SLACK_WEBHOOK_URL` pointed at `http://127.0.0.1:<port>/hook` is the whole
-setup; whatever the listener prints is byte for byte what Slack would have
+starts, never against `hooks.slack.com`**. `TRIAGE_WEBHOOK_URL` pointed at
+`http://127.0.0.1:<port>/hook` is the whole setup (a loopback URL reads as
+`generic`; `TRIAGE_NOTIFY=slack` or `discord` to see that payload instead);
+whatever the listener prints is byte for byte what the far end would have
 received, which is a better proof than a message arriving. Slack-shaped
 code — blocks, handlers — is covered by the tests against the fakes
-(`test/fake-webhook.js` is the webhook's); a change to the real Bolt
+(`test/fake-webhook.js` is the webhook's, whatever its shape); a change to the real Bolt
 wiring is verified on `main` after the merge, by the deploy.
 
 What a worktree *does* do for real: poll GitHub every minute with the same
@@ -292,7 +293,9 @@ seam are all there), to how the preferences file is read in
 `test/config.test.js`; a change to what a message says gets one in
 `test/slack.test.js` or `test/handlers.test.js` against `deliver/blocks.js`;
 a change to delivery in webhook mode gets one in `test/slack.test.js`
-(the webhook section at the end) or `test/webhook.test.js`;
+(the webhook section at the end: the windows and the guards) or
+`test/notify.test.js` (the client, the three shapes, the mention per
+endpoint);
 a change to acting gets one in `test/actions.test.js` or `test/api.test.js`;
 a change to the GitLab source — the todos, the discussions, the system
 notes, Done marking the todo, the open set — gets one in
