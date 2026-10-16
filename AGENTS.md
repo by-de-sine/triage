@@ -7,7 +7,7 @@ is not repeated here; read it first. This file is how to *work on* it.
 ## Where things are
 
 ```text
-server.js        boot: config, store, the forge clients (GitHub, GitLab — each registers when its token resolves, and says who you are there), the Google client, Slack, the runner, the API
+server.js        boot: config, store, the forge clients (GitHub, GitLab — each registers when its token resolves, and says who you are there), the Google client, Slack, the runner, the API; under TRIAGE_DEMO=1 (lib/config.js `demoConfig`) every source on its fake from test/ and delivery off
 sources/         one file per source: github.js, gitlab.js, calendar.js, ledger.js, ha.js, crm.js — poll(ctx) → batches + cursor; due(ctx) for the clock's half; reconcile(ctx) for the state half (github.js, gitlab.js and crm.js have both: a forge's inbox is a feed and the open issues of TRIAGE_GITHUB_ISSUES / TRIAGE_GITLAB_ISSUES are state; the CRM's open tasks are state and anybody else's edit is an event; ledger.js and ha.js are state throughout); whoami(ctx) and mark(item, ctx) on the forges
 rules/           thread.js (both forges: a reply on GitLab is the same observation as one on GitHub), calendar.js, ledger.js, ha.js, crm.js — ordered, named, every match returned; each rule declares its `claim`
 deliver/         slack.js (the windows, the guards, the answer on every decision — the same for both halves), notify.js (the webhook half, TRIAGE_SLACK=webhook: one URL, one post, the mention grammar per endpoint), messages.js (pure; the three shapes TRIAGE_NOTIFY picks — slack, discord, generic — each drawn by item.kind), blocks.js (pure; the app's message and views, and the slack shape's source), handlers.js (TRIAGE_SLACK=app only: buttons, /triage, Home), interrupts.js (M5 + §14: which rules, per source, for which project, may fire Slack — four layers resolved into one statement list)
@@ -16,7 +16,7 @@ public/          the list page (index.html, app.js) and the stats page (stats.ht
 bin/replay.js    run the rules over one real thread, on either forge, step by step, writing nothing
 bin/google-consent.js  the one browser step, run once by hand: mints the calendar's refresh token
 slack/           the app manifest
-test/            node --test; in-memory store, fake GitHub (fake-github.js), fake GitLab (fake-gitlab.js), fake Slack, fake calendar (fake-calendar.js), fake Home Assistant (fake-ha.js), fake Twenty (fake-twenty.js), a temp-dir ledger (ledger.test.js)
+test/            node --test; in-memory store, fake GitHub (fake-github.js), fake GitLab (fake-gitlab.js), fake Slack, fake calendar (fake-calendar.js), fake Home Assistant (fake-ha.js), fake Twenty (fake-twenty.js), a temp-dir ledger (ledger.test.js; fake-ledger.js is the demo's). Each fake's demo*() is what its `fake` mode and `npm run demo` run
 docs/plan.md     the plan: what is still intended, with dated notes for what shipped or was superseded
 .env.example     every variable, commented; preferences.example.json is the preferences file's shape
 ```
@@ -172,14 +172,24 @@ the mention that makes a webhook's message a notification rather than a
 badge; it is not a milestone either, it is what the first real interrupt
 this system sent turned out to need. **§16 (2026-10-15) is triage for
 strangers** — flexible on the input, opinionated on the output — and its
-G1, the forge layer and GitLab, is the first port; G2 (the webhook
-shapes), G3 (the demo) and G4 (the calendar as an ICS feed) follow in that
-order, and G5 (the Slack app surface) waits on the app. **M6 · learn it**
+G1, the forge layer and GitLab, is the first port (#2 in this
+repository's numbering); G2, the webhook shapes, is #3; G3, the demo —
+`TRIAGE_DEMO=1`, every fake at once — is the third; G4 (the calendar as an
+ICS feed) follows, and G5 (the Slack app surface) waits on the app. **M6 · learn it**
 is structural only — revealed preference from `actions`, saturation and
 spread, hysteresis tuning (§7) — and is not gated on them. Gmail moves
 behind M6 (§11.8) and is not started.
 
 ## Running it: one worktree, one instance
+
+**`TRIAGE_DEMO=1` (`npm run demo`) is every fake below at once** — both
+forges, the calendar, the ledger, Home Assistant and the CRM — with the
+store in memory unless `TRIAGE_DB` names one and delivery off unless
+`TRIAGE_WEBHOOK_URL` is loopback (plan §16, G3). A source's own `off`
+leaves one fake out; each `fake` mode still works on its own, because a
+worktree proving one source wants one fake, not six. In a worktree, put
+`TRIAGE_DEMO=1` in its `.env` — the demo reads a `.env` only when
+`TRIAGE_ENV` names it, which the worktree's unit does.
 
 Every task is a worktree on its own branch with its own running instance:
 its own `.env` (gitignored, handed to the process as `TRIAGE_ENV`), its own
@@ -304,6 +314,10 @@ forge clients (auth headers, the per-owner token, paging, the web base) or
 to the token fallbacks gets one in `test/forge-api.test.js`;
 a change to the ledger's parsing, rules, reconcile or answers gets one in
 `test/ledger.test.js`, which writes a real queue file to a temp dir;
+a change to what the demo boots — which fakes, the store, what may be
+delivered — gets one in `test/demo.test.js`, which resolves the config and
+boots `server.js` itself on every fake (a fake's own canned world is
+tested beside its source);
 a change to the CRM source — who counts as somebody else, the
 fingerprint, its rules, its reconcile or the unread alarm — gets one in
 `test/crm.test.js`, against `test/fake-twenty.js`, which is the real

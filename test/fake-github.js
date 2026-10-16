@@ -1,10 +1,11 @@
 // A GitHubApi stand-in: routes to fixtures, counts calls, answers 304 when
-// asked with the Last-Modified it last sent.
+// asked with the Last-Modified it last sent, records a thread marked read.
+// Also the canned inbox the demo runs against.
 import { GitHubApi } from '../lib/forge-api.js';
 
 export function fakeApi(routes, { pollInterval = 60, lastModified = 'Mon, 01 Sep 2026 00:00:00 GMT' } = {}) {
   const calls = [];
-  const fetch = async (url, { headers }) => {
+  const fetch = async (url, { headers, method = 'GET' }) => {
     calls.push(url);
     const u = new URL(url);
     const path = u.pathname + (u.search ? '?' + [...u.searchParams].filter(([k]) => k !== 'per_page').map(([k, v]) => `${k}=${v}`).join('&') : '');
@@ -21,12 +22,14 @@ export function fakeApi(routes, { pollInterval = 60, lastModified = 'Mon, 01 Sep
       if (headers['if-modified-since'] && headers['if-modified-since'] === (routes.lastModified || lastModified)) return { status: 304, headers: hdr, text: async () => '' };
       return { status: 200, headers: hdr, text: async () => JSON.stringify(routes['/notifications']) };
     }
+    if (method === 'PATCH' && /^\/notifications\/threads\/[^/]+$/.test(u.pathname)) { routes.marked = (routes.marked || []).concat(u.pathname.split('/').pop()); return { status: 205, headers: hdr, text: async () => '' }; }
     const hit = routes[path] ?? routes[u.pathname];
     if (hit === undefined) return { status: 404, headers: hdr, text: async () => JSON.stringify({ message: `no fixture for ${path}` }) };
     return { status: 200, headers: hdr, text: async () => JSON.stringify(typeof hit === 'function' ? hit(u) : hit) };
   };
   const api = new GitHubApi({ token: 't', tokensDir: '/nonexistent', fetch });
   api.calls = calls;
+  api.routes = routes;
   return api;
 }
 
@@ -50,3 +53,45 @@ export const openList = (...entries) => entries.map((e) => (e.kind === 'pull' ? 
 export const comment = (id, by, created_at, body, repo = 'o/r', number = 1) => ({ id, user: user(by), created_at, updated_at: created_at, body, html_url: `https://github.com/${repo}/pull/${number}#issuecomment-${id}` });
 export const reviewComment = (id, by, created_at, body, in_reply_to_id = null) => ({ id, user: user(by), created_at, updated_at: created_at, body, in_reply_to_id, path: 'a.js', html_url: `https://github.com/o/r/pull/1#discussion_r${id}` });
 export const review = (id, by, submitted_at, state, body = '') => ({ id, user: user(by), submitted_at, state, body, html_url: `https://github.com/o/r/pull/1#pullrequestreview-${id}` });
+
+/** An inbox shaped like a working day, relative to `now`, for
+ *  `TRIAGE_GITHUB=fake` and the demo: one of each thing the thread rules
+ *  separate — a reply on your pull request, a mention, a review request, a
+ *  merge, a bot's bump — and an open set of three issues. You are `alice`. */
+export function demoGithub({ now = () => new Date() } = {}) {
+  const t = now().getTime();
+  const at = (min) => new Date(t - min * 60_000).toISOString();
+  const R = 'acme/widgets', S = 'acme/site';
+  const none = (repo, n) => ({ [`/repos/${repo}/issues/${n}/comments`]: [], [`/repos/${repo}/pulls/${n}/comments`]: [], [`/repos/${repo}/pulls/${n}/reviews`]: [] });
+  const routes = {
+    '/user': { login: 'alice' },
+    '/notifications': [
+      notification({ id: 101, repo: R, number: 41, title: 'Stream the export instead of buffering it', reason: 'author', updated_at: at(9) }),
+      notification({ id: 102, repo: R, type: 'Issue', number: 57, title: 'Login page flashes white on dark mode', reason: 'mention', updated_at: at(35) }),
+      notification({ id: 103, repo: R, number: 38, title: 'Retry uploads on 502', reason: 'review_requested', updated_at: at(70) }),
+      notification({ id: 104, repo: S, number: 12, title: 'Bump marketing copy', reason: 'author', updated_at: at(180) }),
+      notification({ id: 105, repo: S, number: 13, title: 'chore(deps): bump esbuild', reason: 'subscribed', updated_at: at(300) }),
+    ],
+    [`/repos/${R}/pulls/41`]: pull({ repo: R, number: 41, title: 'Stream the export instead of buffering it', author: 'alice', created_at: at(600) }),
+    [`/repos/${R}/issues/41/comments`]: [],
+    [`/repos/${R}/pulls/41/comments`]: [reviewComment(9001, 'alice', at(120), 'I think we can drop the buffer here'), reviewComment(9002, 'bob', at(9), 'Agreed — but the 502 path still buffers, see line 40', 9001)].map((c) => ({ ...c, html_url: `https://github.com/${R}/pull/41#discussion_r${c.id}` })),
+    [`/repos/${R}/pulls/41/reviews`]: [{ ...review(7001, 'bob', at(9), 'COMMENTED', 'a few notes inline'), html_url: `https://github.com/${R}/pull/41#pullrequestreview-7001` }],
+    [`/repos/${R}/issues/57`]: issue({ repo: R, number: 57, title: 'Login page flashes white on dark mode', author: 'carol', created_at: at(400), updated_at: at(35) }),
+    [`/repos/${R}/issues/57/comments`]: [{ ...comment(9101, 'carol', at(35), '@alice this looks like the theme script runs after first paint — your area?', R, 57), html_url: `https://github.com/${R}/issues/57#issuecomment-9101` }],
+    [`/repos/${R}/pulls/38`]: pull({ repo: R, number: 38, title: 'Retry uploads on 502', author: 'carol', created_at: at(500), requested_reviewers: ['alice'] }),
+    ...none(R, 38),
+    [`/repos/${S}/pulls/12`]: pull({ repo: S, number: 12, title: 'Bump marketing copy', author: 'alice', created_at: at(900), state: 'closed', merged_at: at(180), closed_at: at(180) }),
+    ...none(S, 12),
+    [`/repos/${S}/pulls/13`]: pull({ repo: S, number: 13, title: 'chore(deps): bump esbuild', author: 'dependabot[bot]', created_at: at(300) }),
+    ...none(S, 13),
+    [`/repos/${S}/issues/13/comments`]: [comment(9201, 'dependabot[bot]', at(300), 'Bumps esbuild from 0.24 to 0.25.', S, 13)],
+    [`/repos/${R}/issues?state=open&sort=updated&direction=asc`]: openList(
+      { repo: R, number: 52, title: 'Export CSV with a BOM for Excel', author: 'alice', created_at: at(3000), updated_at: at(2000) },
+      { repo: R, number: 55, title: 'Rate limit the webhook endpoint', author: 'carol', created_at: at(1500), updated_at: at(800), assignees: ['alice'] },
+      { repo: R, number: 57, title: 'Login page flashes white on dark mode', author: 'carol', created_at: at(400), updated_at: at(35) },
+    ),
+  };
+  const api = fakeApi(routes);
+  api.demo = { repos: [R] };
+  return api;
+}

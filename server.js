@@ -32,6 +32,8 @@ import { sameLogin } from './lib/util.js';
 
 const log = (m) => console.error(`${new Date().toISOString()} triage: ${m}`);
 const cfg = loadConfig();
+// Plan §16, G3: one flag, every fake the tree has, nothing off the box.
+if (cfg.demo) log(`DEMO (TRIAGE_DEMO=1): every source on its canned fake from test/, store ${cfg.db === ':memory:' ? 'in memory' : cfg.db}, ${cfg.envFile ? `env ${cfg.envFile}` : 'no .env read'}; delivery ${cfg.slack.mode === 'webhook' && cfg.slack.notify !== 'off' ? `to the loopback webhook (${cfg.slack.notify})` : 'off — nothing leaves the box; point TRIAGE_WEBHOOK_URL at a listener on 127.0.0.1 to read the payload'}`);
 const store = new Store(cfg.db);
 
 // The forges (plan §16, G1). Each registers when its token resolves — or
@@ -39,17 +41,26 @@ const store = new Store(cfg.db);
 // registers it — and says at boot who you are there, resolved once through
 // the source's own `whoami`. One thread-shaped rule set serves both,
 // because a reply on GitLab is the same observation as a reply on GitHub.
+// `fake` is the canned forge from test/, which answers who you are (alice)
+// and says which repositories its open set covers.
 const sources = [], extras = {}, rules = {}, identity = {};
-async function forge(name, source, c, Api, tokenOf, apiOpts = {}) {
+async function forge(name, source, c, Api, tokenOf, apiOpts = {}, demoApi) {
   const NAME = name.toUpperCase();
   if (c.mode === 'off') { log(`${name}: off (TRIAGE_${NAME}=off)`); return null; }
+  if (c.mode === 'fake') {
+    const api = await demoApi();
+    return register(name, source, { ...c, user: null, issues: { ...c.issues, ...api.demo } }, api, ` — FAKE (TRIAGE_${NAME}=fake), the canned ${name === 'github' ? 'GitHub' : 'GitLab'} from test/`);
+  }
   const token = c.token || await tokenOf(process.env);
   if (!token) {
     log(`${name}: off — no ${NAME}_TOKEN${c.mode === 'on' ? ` (TRIAGE_${NAME}=on)` : ''}${name === 'github' ? ' and nothing from `gh auth token`' : name === 'gitlab' ? ' and nothing from `glab auth token`' : ''}`);
     if (c.mode === 'on') process.exit(1);
     return null;
   }
-  const api = new Api({ base: c.base, token, ...apiOpts });
+  return register(name, source, c, new Api({ base: c.base, token, ...apiOpts }));
+}
+async function register(name, source, c, api, note = '') {
+  const NAME = name.toUpperCase();
   let me;
   try { me = await source.whoami({ api, user: c.user }); }
   catch (e) {
@@ -68,11 +79,11 @@ async function forge(name, source, c, Api, tokenOf, apiOpts = {}) {
   // Issues as state (plan §12.3 item 2): the inbox carries none, so the open
   // set of each listed repository is read whole and reconciled. Which ones
   // is yours to say, as config (§12.7); unset, the source is the inbox alone.
-  log(`${name}: ${api.base} as ${me}${watched.length ? `; open issues as state from ${watched.join(', ')} every ${Math.round(c.issues.everyMs / 60_000)} min` : '; issues as state off — no repository named'}`);
+  log(`${name}: ${api.base} as ${me}${note}${watched.length ? `; open issues as state from ${watched.join(', ')} every ${Math.round(c.issues.everyMs / 60_000)} min` : '; issues as state off — no repository named'}`);
   return api;
 }
-await forge('github', github, cfg.github, GitHubApi, githubToken, { tokensDir: cfg.github.tokensDir });
-await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken);
+await forge('github', github, cfg.github, GitHubApi, githubToken, { tokensDir: cfg.github.tokensDir }, async () => (await import('./test/fake-github.js')).demoGithub());
+await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken, {}, async () => (await import('./test/fake-gitlab.js')).demoGitlab());
 // The one person the items belong to: `items.user`, which scopes every
 // read. Whoever the store already files items under, so that adding a
 // forge later never re-keys a queue; on an empty store, the GitHub login
@@ -89,7 +100,7 @@ const cal = await calendarSource(cfg.calendar, log);
 // The ledger (plan §12.3): local files, so it registers whenever the queue
 // file is there. The first state-shaped source, and the first with a
 // reconcile — nothing in lib/ knows what a queue row is.
-const led = ledgerSource(cfg.ledger, log);
+const led = await ledgerSource(cfg.ledger, log);
 // The household's to-do lists (plan §12.8): the same state shape as the
 // ledger, over one long-lived token, and off unless it is configured.
 const hass = await haSource(cfg.ha, log);
@@ -102,7 +113,7 @@ if (hass) { sources.push(ha); rules.ha = haRules; }
 if (twenty) { sources.push(crm); rules.crm = crmRules; }
 if (!sources.length) { log('no source is configured: set GITHUB_TOKEN (or log gh in), GITLAB_TOKEN, or one of the other sources'); process.exit(1); }
 if (!user) { log(`items belong to nobody: no forge is on, so there is no login to file them under — set GITHUB_TOKEN or GITLAB_TOKEN`); process.exit(1); }
-log(`items belong to ${user}; store ${cfg.db}; env ${cfg.envFile}; commit ${cfg.commit || 'unknown'}`);
+log(`items belong to ${user}; store ${cfg.db}; env ${cfg.envFile || 'none read'}; commit ${cfg.commit || 'unknown'}`);
 
 // The one action path: the Slack buttons, POST /api/items/:id/act and the
 // page all call this. What Done does *outside* triage is per source: the
@@ -122,7 +133,7 @@ log(`rank: claim ${cfg.rank.weights.claim} · time ${cfg.rank.weights.time} (${O
 log(`slack: interrupts on ${Object.entries(deliver.interruptMap).map(([k, v]) => `${k}: ${v.join(', ') || 'nothing'}`).join(' · ') || 'nothing (TRIAGE_INTERRUPT=off)'}${cfg.prefsFile ? ` · ${cfg.slack.interrupts.statements.length} statements over ${Object.keys(cfg.prefs.projects).length} projects (${cfg.prefsFile})` : ''}`);
 // Plan §14.1: a webhook's channel message notifies nobody unless it names
 // somebody, and the first real P0 this system sent proved it the hard way.
-if (cfg.slack.mode === 'webhook') log(`notify: interrupts ${cfg.slack.mention ? `mention ${cfg.slack.mention} — so the channel notifies, not just delivers` : 'mention nobody (TRIAGE_MENTION unset or off): a channel message is an unread badge, not a push'}`);
+if (cfg.slack.mode === 'webhook' && cfg.slack.notify !== 'off') log(`notify: interrupts ${cfg.slack.mention ? `mention ${cfg.slack.mention} — so the channel notifies, not just delivers` : 'mention nobody (TRIAGE_MENTION unset or off): a channel message is an unread badge, not a push'}`);
 
 // What Done does outside triage, per source: a map keyed by source name,
 // never a branch in act(). A source that declares `mark` supplies its own
@@ -161,7 +172,8 @@ const runner = new Runner(store, sources, {
 });
 const app = createApp({ store, runner, deliver, act, rank, rules, user, identity, commit: cfg.commit, tz: cfg.slack.tz, log });
 const server = http.createServer(app);
-server.listen(cfg.port, cfg.host, () => { log(`listening on http://${cfg.host}:${cfg.port}`); runner.start(); });
+// The port as bound, not as asked: `TRIAGE_PORT=0` takes any free one.
+server.listen(cfg.port, cfg.host, () => { log(`listening on http://${cfg.host}:${server.address().port}`); runner.start(); });
 
 /** The calendar's client, or null when it should not be registered. Says
  *  out loud which of the three it is, because "the calendar is quiet" and
@@ -193,6 +205,9 @@ async function haSource(c, log) {
   if (c.mode === 'fake') {
     const { demoHa } = await import('./test/fake-ha.js');
     log('ha: FAKE (TRIAGE_HA=fake) — the canned lists from test/; every item says (fake)');
+    // The canned house's own lists, unless HA_LISTS names some of them: with
+    // none named the source would read nothing and say so every poll.
+    if (!c.lists.length) c.lists.push('todo.alice_inbox', 'todo.household');
     return demoHa();
   }
   if (!c.url || !c.token) {
@@ -240,9 +255,17 @@ async function crmSource(c, log) {
   return api;
 }
 
-/** The ledger's files, or null when it should not be registered. */
-function ledgerSource(c, log) {
+/** The ledger's files, or null when it should not be registered. `fake`
+ *  writes a canned queue file and its handoffs to a temp dir, removed at
+ *  shutdown. */
+async function ledgerSource(c, log) {
   if (c.mode === 'off') { log('ledger: off (TRIAGE_LEDGER names no queue file)'); return null; }
+  if (c.mode === 'fake') {
+    const { demoLedger } = await import('./test/fake-ledger.js');
+    const f = demoLedger();
+    log(`ledger: FAKE (TRIAGE_DEMO=1) — a canned queue file at ${f.file}, removed at shutdown; every row says (fake)`);
+    return f;
+  }
   if (!existsSync(c.file)) { log(`ledger: ${c.file} is not there (TRIAGE_LEDGER names it)`); process.exit(1); }
   log(`ledger: ${c.file}, handoffs in ${c.statusDir}`);
   return { file: c.file, statusDir: c.statusDir };
@@ -258,6 +281,7 @@ const shutdown = async (sig) => {
   await Promise.allSettled([...runner.inflight.values()]);   // a poll in progress lands its verdicts
   await deliver.stop().catch(() => {});
   store.close();
+  led?.cleanup?.();
   process.exit(0);
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
