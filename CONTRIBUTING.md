@@ -182,6 +182,7 @@ forge and writing nothing. For the calendar, the equivalent is
 | what may interrupt — layers, statements, projects | `interrupts.test.js` |
 | reading config or the preferences file | `config.test.js` |
 | what a message says | `slack.test.js` or `handlers.test.js`, against `deliver/blocks.js` |
+| the app's DM following the item, follow-ups, the Home tab | `surface.test.js` |
 | webhook delivery — windows, guards | `slack.test.js` (the webhook section) |
 | the webhook client, shapes, mentions | `notify.test.js` |
 | acting | `actions.test.js`, `api.test.js` |

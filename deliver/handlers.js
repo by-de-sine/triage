@@ -7,7 +7,7 @@
 // One user. Anyone else in the workspace who opens the app or runs /triage
 // is told whose queue it is and nothing more.
 import { lists as buildLists } from '../lib/lists.js';
-import { parseAction, listBlocks, p0Message } from './blocks.js';
+import { parseAction, listBlocks, p0Message, actedLine, sinceLine } from './blocks.js';
 
 export function registerHandlers(app, { store, act, user, userId, rank = null, now = () => new Date(), log = () => {} }) {
   const mine = (id) => id === userId;
@@ -24,8 +24,8 @@ export function registerHandlers(app, { store, act, user, userId, rank = null, n
   const HOME = { queue: 70, snoozed: 12, later: 12 };     // < 100
 
   // A link button still sends an interaction; an unacknowledged one shows
-  // the user a warning triangle.
-  app.action('open', async ({ ack }) => { await ack(); });
+  // the user a warning triangle. Open, and a meeting's Join (`link:join`).
+  app.action(/^(open$|link:)/, async ({ ack }) => { await ack(); });
 
   app.action(/^act:/, async ({ ack, body, action, client, respond }) => {
     await ack();
@@ -46,12 +46,15 @@ export function registerHandlers(app, { store, act, user, userId, rank = null, n
       const last = store.lastSent(r.item.id);
       if (!last || last.message_ts !== body.message.ts || last.channel !== body.channel.id) {
         const row = store.deliveriesFor(r.item.id).find((d) => d.message_ts === body.message.ts) || null;
-        await client.chat.update({ channel: body.channel.id, ts: body.message.ts, ...actedMessage(store, r, now(), row?.decision_id) });
+        await client.chat.update({ channel: body.channel.id, ts: body.message.ts, ...itemMessage(store, r.item, row?.decision_id) });
       }
     }
   });
 
-  app.command('/triage', async ({ ack, command }) => {
+  // `/triage`, or any `/triage-…`: a second app made from the same manifest
+  // for development (CONTRIBUTING.md) cannot also own `/triage`, and this
+  // way it needs no setting to say what it renamed it to.
+  app.command(/^\/triage(-[\w-]+)?$/, async ({ ack, command }) => {
     if (!mine(command.user_id)) return ack({ response_type: 'ephemeral', text: notYours });
     // M5: one ordered list, so `queue` is the word for all of it. `now` and
     // `soon` were the P0 and P1 groups and are kept as aliases for it — the
@@ -66,7 +69,10 @@ export function registerHandlers(app, { store, act, user, userId, rank = null, n
     await publishHome(client, event.user);
   });
 
-  async function publishHome(client, forUser) {
+  /** Draw the Home tab for one person. Called on `app_home_opened`, after a
+   *  menu press on it, and by delivery whenever the lists change (G5), so
+   *  the tab is current before it is opened rather than redrawn on it. */
+  async function publishHome(client, forUser = userId) {
     const view = mine(forUser)
       ? { type: 'home', blocks: listBlocks(lists(HOME), { menus: true, title: 'triage — your queue', cap: 100 }).blocks }
       : { type: 'home', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: notYours } }] };
@@ -76,14 +82,35 @@ export function registerHandlers(app, { store, act, user, userId, rank = null, n
   return { publishHome };
 }
 
-/** The DM for an item, rewritten to say what was just done to it. It is
- *  rebuilt from the decision the DM was sent for (`decisionId`), not the
- *  newest one — a P1 that landed since must not rewrite a P0's words.
- *  Reopening puts the buttons back. */
-export function actedMessage(store, { item, action, until, marked }, at = new Date(), decisionId = null) {
+/** The DM for an item, drawn from where the item stands now (G5). Every
+ *  redraw comes through here — a press, and the moves nobody pressed for:
+ *  the source resolved it, the snooze ended, new activity reopened it, a
+ *  newer verdict landed — so the message cannot say one thing after a press
+ *  and another after a poll.
+ *
+ *  The words are the decision the DM was sent for (`decisionId`), not the
+ *  newest one: a P1 that landed since must not rewrite a P0's. A newer
+ *  verdict is a `since:` line beneath them instead. The state decides the
+ *  rest: done, snoozed, later or muted is the line saying so and no
+ *  buttons; open has the buttons, and a line for a wake or a reopen that
+ *  happened after the DM's own decision. Your own reopen puts the buttons
+ *  back and says nothing more. */
+export function itemMessage(store, item, decisionId = null) {
   const decisions = store.decisionsFor(item.id);
   const decision = decisions.find((d) => d.id === decisionId) || decisions.findLast((d) => d.tier === 'P0') || decisions.at(-1) || null;
   const events = store.events(item.id);
   const event = events.filter((e) => decision?.event_ids.includes(e.id)).at(-1) || events.at(-1) || null;
-  return p0Message({ item, decision, event, acted: action === 'open' ? null : { action, until, marked, at: at.toISOString() } });
+  const last = store.actionsFor(item.id).at(-1) || null;
+  if (item.state !== 'open') {
+    // A stored item that was never acted on is open, so a closed one has an
+    // action row; the fallback keeps a hand-edited store from throwing.
+    const a = last || { action: item.state, data: {} };
+    const action = a.action === 'snooze' || a.action === 'later' || a.action === 'mute' || a.action === 'done' || a.action === 'answer' || a.action === 'resolved' ? a.action : { snoozed: 'snooze', muted: 'mute' }[item.state] || item.state;
+    return p0Message({ item, decision, event, acted: { action, until: item.state_until, marked: a.data?.marked, reason: a.data?.reason, choice: a.data?.choice ? `${a.data.choice}) ${a.data.label || ''}`.trim() : null, at: a.ts || null } });
+  }
+  const status = [];
+  if (last && (last.action === 'wake' || last.action === 'reopen') && (!decision || last.ts >= decision.ts)) status.push(actedLine({ action: last.action, reason: last.data?.reason, at: last.ts }));
+  const newer = decisions.findLast((d) => d.by !== 'wake');
+  if (decision && newer && newer.id > decision.id) status.push(sinceLine(newer));
+  return p0Message({ item, decision, event, status });
 }

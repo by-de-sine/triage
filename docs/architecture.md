@@ -117,7 +117,10 @@ which one runs:
   message per interrupt, in one of three shapes — `slack`, `discord` or
   `generic` JSON.
 - **App** (Bolt in Socket Mode, `deliver/blocks.js`,
-  `deliver/handlers.js`): a DM with buttons, `/triage`, a Home tab.
+  `deliver/handlers.js`): a DM per item with buttons, redrawn from the
+  item's state whenever it moves — a press, or the pipeline's `moved`
+  for what nobody pressed — with later interrupts replied into its
+  thread; `/triage`; a Home tab republished when the lists change.
 
 See [interrupts](interrupts.md).
 
@@ -138,7 +141,7 @@ SQLite in WAL mode, at `TRIAGE_DB` (default
 | `events` | append-only, unique by key |
 | `decisions` | every verdict: rule, tier, reason, the whole `matches` set, `event_ids`, what delivery did, and `by` (`rule`, or `wake`) |
 | `actions` | everything done to an item, by whom |
-| `deliveries` | which message carries which item: `sent`, `held`, `dropped`; `message_ts` is Slack's id (null from a webhook, which returns none) |
+| `deliveries` | which message carries which item: `sent`, `held`, `dropped`; `message_ts` is Slack's id (null from a webhook, which returns none); `thread_ts` marks a follow-up replied into the item's DM |
 | `cursors`, `source_runs` | per-source cursor and read health |
 
 **The schema migrates itself at boot**, idempotently: `CREATE IF NOT

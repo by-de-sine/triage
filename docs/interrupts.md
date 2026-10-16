@@ -23,7 +23,7 @@ so>); it is in the list`.
 | | |
 |---|---|
 | **Quiet window** | `TRIAGE_QUIET` (default `23:00-07:00`, in `TRIAGE_TZ`). Interrupts are held and sent when it ends |
-| **Coalescing** | one message per item per `TRIAGE_COALESCE_MIN` (10). The first alarm for an item is never held — it goes the moment the verdict lands, and that opens the window. A second one inside the window is held and sent once, as a follow-up, when the window ends (under the app, the message is updated instead) |
+| **Coalescing** | one message per item per `TRIAGE_COALESCE_MIN` (10). The first alarm for an item is never held — it goes the moment the verdict lands, and that opens the window. A second one inside the window is held and sent once, as a follow-up, when the window ends (under the app, the message is updated instead, and a later one is a reply in its thread — below) |
 | **Age** | an event older than `TRIAGE_DELIVER_MAX_AGE_H` (24) is tiered but not sent, so a first boot does not replay your inbox into Slack |
 | **Acting first** | a held message is dropped if you act on the item before it goes out |
 | **Snooze** | a snooze that wakes as a P0 is always sent — you asked to be interrupted then. One that wakes as anything else goes back in the list |
@@ -77,13 +77,33 @@ comments say which token is which), then set `SLACK_BOT_TOKEN`,
 `SLACK_APP_TOKEN` and `SLACK_USER_ID`, and `npm ci` for the two Slack
 packages.
 
-One DM per interrupt: title, repository, who did what, one line of the
+One DM per item: title, repository, who did what, one line of the
 comment, and **Open · Done · Snooze 1h · Snooze 1d · Later · Mute thread**.
 A meeting's DM is its title, start, place and guests, with **Join** first.
-A second interrupt for the same item inside the coalesce window updates
-the DM rather than sending another.
 
-The app path has never been exercised against a real Slack workspace.
+**That DM is where the item lives**, and it follows the item:
+
+| What happened | The DM |
+|---|---|
+| you pressed something, here or on the page | says what you did; the buttons go (your reopen brings them back) |
+| its source resolved it (a ledger row deleted, an issue closed) | `✓ resolved at its source`, no buttons; back in the set, the buttons return |
+| the snooze ended as less than a P0 | the buttons return, under `⏰ snooze ended` |
+| new activity reopened it | the buttons return, under `↺ reopened by new activity` |
+| a newer verdict landed that does not interrupt | keeps its words, with a `since:` line naming the newer one |
+| another interrupt, inside the coalesce window | updated in place, silently |
+| another interrupt, after it (a P0 snooze waking included) | updated, and the interrupt is a **reply in its thread**, broadcast to the conversation so it notifies. The buttons stay on the DM |
+
+A DM that has been deleted is answered by posting a fresh one, which is
+the item's DM from then on. The rank's position is not on the DM, so the
+order drifting with time redraws nothing.
+
+**The Home tab is kept current:** republished a moment after the lists
+change (a burst of changes is one publish), every fifteen minutes so the
+time terms show, and at boot — not only when it is opened.
+
+`/triage` also answers as `/triage-<anything>`, for a second app made from
+the manifest for development
+([CONTRIBUTING.md](../CONTRIBUTING.md#proving-delivery)).
 
 ## Making it yours
 
