@@ -87,8 +87,10 @@ await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken, {}, async () =
 // The one person the items belong to: `items.user`, which scopes every
 // read. Whoever the store already files items under, so that adding a
 // forge later never re-keys a queue; on an empty store, the GitHub login
-// when GitHub is on, else the GitLab username.
-const user = store.firstUser() ?? identity.github ?? identity.gitlab ?? null;
+// when GitHub is on, else the GitLab username. The demo's is the fixtures'
+// own, always: with both forges off there is no login to take, and a store
+// TRIAGE_DB names must not have the canned day filed under its owner.
+const user = cfg.demo ? 'alice' : store.firstUser() ?? identity.github ?? identity.gitlab ?? null;
 if (user && Object.values(identity).length && !Object.values(identity).some((me) => sameLogin(me, user))) log(`items belong to ${user} (the store's), which is none of this boot's identities (${Object.entries(identity).map(([k, v]) => `${k}: ${v}`).join(', ')}) — set TRIAGE_DB to start a queue of your own`);
 
 // M3: the second source. It registers only when it can actually read a

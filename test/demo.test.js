@@ -71,19 +71,25 @@ test('a .env that says TRIAGE_DEMO=1 is the demo too, read because TRIAGE_ENV na
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('TRIAGE_DEMO=1 boots server.js on every fake: items from every source, nothing delivered, the temp ledger removed at shutdown', async (t) => {
+/** server.js under TRIAGE_DEMO=1 in a bare environment — no token, no
+ *  .env, no PATH to `gh`: the stranger with nothing. */
+async function boot(t, extra = {}) {
   const home = mkdtempSync(path.join(tmpdir(), 'triage-demo-home-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
-  // A bare environment: no token, no .env, no PATH to `gh` — the stranger with nothing.
-  const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], { env: { HOME: home, TRIAGE_DEMO: '1', TRIAGE_PORT: '0', TRIAGE_QUIET: '', TZ: 'UTC' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], { env: { HOME: home, TRIAGE_DEMO: '1', TRIAGE_PORT: '0', TRIAGE_QUIET: '', TZ: 'UTC', ...extra }, stdio: ['ignore', 'ignore', 'pipe'] });
   t.after(() => child.kill('SIGKILL'));
-  let log = '';
-  const base = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`no listening line in 5 s:\n${log}`)), 5000);
-    child.stderr.on('data', (b) => { log += b; const m = /listening on (http:\/\/\S+)/.exec(log); if (m) { clearTimeout(timer); resolve(m[1]); } });
-    child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`server.js exited ${code}:\n${log}`)); });
+  const out = { child, log: '' };
+  out.base = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no listening line in 5 s:\n${out.log}`)), 5000);
+    child.stderr.on('data', (b) => { out.log += b; const m = /listening on (http:\/\/\S+)/.exec(out.log); if (m) { clearTimeout(timer); resolve(m[1]); } });
+    child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`server.js exited ${code}:\n${out.log}`)); });
   });
-  const get = async (p) => (await fetch(base + p)).json();
+  out.get = async (p) => (await fetch(out.base + p)).json();
+  return out;
+}
+
+test('TRIAGE_DEMO=1 boots server.js on every fake: items from every source, nothing delivered, the temp ledger removed at shutdown', async (t) => {
+  const { child, base, get, log } = await boot(t);
   // Poll each now rather than wait for the runner's stagger.
   for (const s of SOURCES) assert.equal((await fetch(`${base}/api/sources/${s}/run`, { method: 'POST' })).status, 200, s);
   const { sources } = await get('/api/sources');
@@ -104,4 +110,11 @@ test('TRIAGE_DEMO=1 boots server.js on every fake: items from every source, noth
   child.kill('SIGTERM');
   await new Promise((r) => child.on('exit', r));
   assert.equal(existsSync(path.dirname(ledgerFile)), false, 'the temp ledger is removed at shutdown');
+});
+
+test('the demo with both forges off still boots, its items filed under alice', async (t) => {
+  const { base, get } = await boot(t, { TRIAGE_GITHUB: 'off', TRIAGE_GITLAB: 'off' });
+  for (const s of ['calendar', 'ha']) assert.equal((await fetch(`${base}/api/sources/${s}/run`, { method: 'POST' })).status, 200, s);
+  assert.deepEqual((await get('/api/sources')).sources.map((s) => s.name).sort(), ['calendar', 'crm', 'ha', 'ledger']);
+  assert.ok((await get('/api/items')).items.length > 0, 'the items are alice\'s, so the page shows them');
 });
