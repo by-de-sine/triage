@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>triage</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='6' fill='%23B4541F'/%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='%23068F88' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/style.css">
+<script>
+  // Theme before first paint, so a dark reader never sees paper flash.
+  try { const q = new URLSearchParams(location.search).get('theme'); const t = q || localStorage.getItem('triage.theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+</script>
+</head>
+<body>
+<header class="mast">
+  <h1 class="brand">
+    <a class="wordmark" href="/" title="triage">triage</a>
+  </h1>
+  <nav class="nav" aria-label="pages"><a href="/" aria-current="page">list</a><a href="/stats">stats</a></nav>
+  <div class="glance" id="glance" aria-label="at a glance"></div>
+  <div class="pulse" id="pulse"><span class="dot" id="dot"></span><span id="observed">loading…</span></div>
+  <button class="theme" id="theme" title="theme (t)" aria-label="toggle theme">◐</button>
+</header>
+
+<main id="main">
+  <!-- M5: one ordered list. The groups are built by the script now, because
+       what they are depends on `?group=` — ungrouped it is the queue, then
+       snoozed and later. -->
+  <div class="controls">
+    <label for="group">group</label>
+    <select id="group">
+      <option value="">nothing — one list</option>
+      <option value="repo">repo</option>
+      <option value="owner">owner — what it takes</option>
+      <option value="source">source</option>
+      <option value="tier">tier</option>
+      <option value="kind">kind</option>
+    </select>
+    <span class="muted" id="ranked"></span>
+    <span class="find">
+      <input id="q" type="search" placeholder="find (/)" aria-label="find a word in the list" autocomplete="off" spellcheck="false">
+      <span id="narrow" class="chips"></span>
+      <button id="clear" class="clear" type="button" title="show everything (esc)">show all</button>
+    </span>
+  </div>
+</main>
+
+<footer class="foot">
+  <span>one list, in rank order — the page shows everything, and acting happens here. <a href="/api/rank">rank</a> · <a href="/api/decisions?limit=50">decisions</a> · <a href="/api/sources">sources</a> · <a href="/healthz">healthz</a></span>
+  <span class="keys"><kbd>j</kbd><kbd>k</kbd> move · <kbd>d</kbd> done · <kbd>s</kbd><kbd>S</kbd> snooze 1h/1d · <kbd>l</kbd> later · <kbd>m</kbd> mute · <kbd>↵</kbd> the solid action · <kbd>/</kbd> find · <kbd>esc</kbd> clear · <kbd>r</kbd> refresh · <kbd>t</kbd> theme · <kbd>g</kbd> group</span>
+</footer>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

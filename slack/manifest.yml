@@ -1,0 +1,36 @@
+# The Slack app, plan §8. Create it at api.slack.com/apps → Create New App →
+# From a manifest, in your own workspace; the work install is the same file.
+# After creating: Basic Information → App-Level Tokens → Generate, scope
+# connections:write (SLACK_APP_TOKEN, xapp-…); Install to Workspace
+# (SLACK_BOT_TOKEN, xoxb-…); your member id from your profile (SLACK_USER_ID).
+display_information:
+  name: triage
+  description: your queue, tiered
+features:
+  bot_user:
+    display_name: triage
+    always_online: true
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  slash_commands:
+    - command: /triage
+      description: your lists — now, soon, snoozed, later
+      usage_hint: "[now|soon|snoozed|later]"
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - im:write
+      - im:history
+      - commands
+      - users:read
+settings:
+  interactivity:
+    is_enabled: true
+  socket_mode_enabled: true
+  event_subscriptions:
+    bot_events:
+      - app_home_opened
+      - message.im

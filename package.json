@@ -1,0 +1,19 @@
+{
+  "name": "triage",
+  "version": "0.1.0",
+  "description": "your queue, tiered: GitHub notifications in, tiered items out, the urgent ones in Slack",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "replay": "node bin/replay.js"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.7.3",
+    "@slack/web-api": "^7.19.0"
+  }
+}

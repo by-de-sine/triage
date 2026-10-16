@@ -1,0 +1,292 @@
+/* triage — the list page, in nerve's clothes.
+   Paper ground; teal is the machine (sources, the API); copper is the human
+   (attention, age, the things waiting on you); crimson is P0. */
+
+:root {
+  --paper: #F3EEE4; --surface: #FBF8F1; --surface-2: #EFE9DC; --rule: #DDD5C4; --rule-2: #CFC6B2;
+  --ink: #1B1A17; --ink-2: #5B5749; --ink-3: #6B655A; --ink-4: #B7B1A0;
+  --teal: #068F88; --teal-2: #0B6F6A; --teal-soft: #D6ECE9; --teal-ghost: #E9F4F2;
+  --copper: #B4541F; --copper-2: #8E3F14; --copper-soft: #F2DDCF; --copper-ghost: #F8ECE3;
+  --crimson: #B3264A; --crimson-soft: #F3D6DE;
+  --primary: #0B6F6A; --on-primary: #FFFFFF; --join: #8E3F14; --on-join: #FFFFFF;
+  --shadow: 0 1px 0 rgba(27,26,23,.04), 0 6px 20px -12px rgba(27,26,23,.25);
+  --display: "Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif;
+  --text: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --r: 10px; --r-s: 6px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #16171A; --surface: #1E2024; --surface-2: #25282D; --rule: #2E3238; --rule-2: #3A3F47;
+    --ink: #ECE7DA; --ink-2: #ABA69A; --ink-3: #97917F; --ink-4: #4F4B43;
+    --teal: #1EA39B; --teal-2: #5CC8C0; --teal-soft: #173634; --teal-ghost: #1A2B2A;
+    --copper: #D4713A; --copper-2: #E9945F; --copper-soft: #3B2A1F; --copper-ghost: #2A221C;
+    --crimson: #E86A82; --crimson-soft: #3B2129;
+    --primary: #1EA39B; --on-primary: #16171A; --join: #D4713A; --on-join: #16171A;
+    --shadow: 0 1px 0 rgba(0,0,0,.2), 0 10px 30px -14px rgba(0,0,0,.7);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #16171A; --surface: #1E2024; --surface-2: #25282D; --rule: #2E3238; --rule-2: #3A3F47;
+  --ink: #ECE7DA; --ink-2: #ABA69A; --ink-3: #97917F; --ink-4: #4F4B43;
+  --teal: #1EA39B; --teal-2: #5CC8C0; --teal-soft: #173634; --teal-ghost: #1A2B2A;
+  --copper: #D4713A; --copper-2: #E9945F; --copper-soft: #3B2A1F; --copper-ghost: #2A221C;
+  --crimson: #E86A82; --crimson-soft: #3B2129;
+  --primary: #1EA39B; --on-primary: #16171A; --join: #D4713A; --on-join: #16171A;
+  --shadow: 0 1px 0 rgba(0,0,0,.2), 0 10px 30px -14px rgba(0,0,0,.7);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body {
+  margin: 0; color: var(--ink); background: var(--paper);
+  font: 14px/1.45 var(--text); font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--ink) 6%, transparent) 1px, transparent 0);
+  background-size: 28px 28px;
+}
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--teal); }
+code, .mono { font-family: var(--mono); font-size: .92em; }
+kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--rule-2); border-bottom-width: 2px; border-radius: 4px; color: var(--ink-2); background: var(--surface); }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 4px; }
+.muted { color: var(--ink-3); font-weight: 400; }
+h1, h2 { font-family: var(--display); font-weight: 600; letter-spacing: -.01em; margin: 0; }
+::selection { background: var(--copper-soft); }
+
+/* ---- masthead -------------------------------------------------------- */
+.mast {
+  position: sticky; top: 0; z-index: 20; display: grid; grid-template-columns: auto 1fr auto auto; gap: 24px; align-items: center;
+  padding: 10px 28px; background: color-mix(in oklab, var(--paper) 88%, transparent); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--rule);
+}
+/* The wordmark is the page's one h1; the size is its own, not a heading's. */
+.brand { display: flex; align-items: baseline; gap: 10px; font: inherit; }
+.wordmark { font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: -.03em; font-variation-settings: "opsz" 48; }
+.wordmark::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--copper); margin-right: 9px; box-shadow: 0 0 0 3px var(--paper), 0 0 0 4.5px var(--teal); vertical-align: 2px; }
+.brand .sub { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+.glance { display: flex; gap: 6px; justify-self: center; flex-wrap: wrap; }
+.tile { font: 500 12px var(--mono); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule-2); color: var(--ink-2); background: var(--surface); }
+.tile b { color: var(--ink); font-weight: 600; }
+.tile.p0 { border-color: var(--crimson); color: var(--crimson); }
+.tile.p0 b { color: var(--crimson); }
+.tile.p1 { border-color: var(--copper); color: var(--copper-2); }
+/* A tile is a filter: pressed, it fills with its own colour. After the
+   tier rules, so the fill wins over them. */
+button.tile:hover, a.tile:hover { border-color: var(--teal); color: var(--teal-2); }
+.tile[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); }
+.tile[aria-pressed="true"], .tile[aria-pressed="true"] b { color: var(--paper); }
+.tile.p0[aria-pressed="true"] { background: var(--crimson); border-color: var(--crimson); }
+.tile.p1[aria-pressed="true"] { background: var(--copper); border-color: var(--copper); }
+.tile.p0[aria-pressed="true"], .tile.p0[aria-pressed="true"] b, .tile.p1[aria-pressed="true"], .tile.p1[aria-pressed="true"] b { color: var(--on-primary); }
+.tile.slack { border-color: var(--teal); color: var(--teal-2); }
+.tile.slack.off { border-color: var(--rule-2); color: var(--ink-3); border-style: dashed; }
+.pulse { font-family: var(--mono); font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 8px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-4); }
+.dot.ok { background: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); }
+.dot.bad { background: var(--crimson); box-shadow: 0 0 0 3px var(--crimson-soft); }
+.pulse .failing { color: var(--crimson); }
+.theme { font-size: 18px; color: var(--ink-2); width: 34px; height: 34px; border-radius: 50%; }
+.theme:hover { background: var(--surface-2); }
+
+/* ---- the lists ------------------------------------------------------- */
+main { max-width: 1100px; margin: 0 auto; padding: 22px 28px 40px; display: grid; gap: 26px; }
+.group h2 { font-size: 19px; font-weight: 700; display: flex; gap: 10px; align-items: baseline; padding: 0 4px 8px; border-bottom: 2px solid var(--teal); }
+.group[data-group="now"] h2 { border-color: var(--crimson); }
+.group[data-group="soon"] h2 { border-color: var(--copper); }
+.group h2 .muted { font-family: var(--text); font-size: 12.5px; }
+.group h2:focus { outline: none; }
+.group h2:focus-visible { outline: 2px solid var(--teal); outline-offset: 4px; border-radius: 2px; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; padding-top: 10px; }
+.empty { color: var(--ink-3); font-size: 13px; padding: 10px 4px; }
+.row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px 14px; align-items: center;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); box-shadow: var(--shadow); padding: 10px 14px;
+  transition: border-color .15s, transform .15s, opacity .3s;
+}
+.row:hover { border-color: var(--rule-2); transform: translateY(-1px); }
+.row.busy { opacity: .5; pointer-events: none; }
+/* The keyboard's cursor: a teal edge, so the act keys have a visible target. */
+.row.current { border-color: var(--teal); box-shadow: var(--shadow), inset 3px 0 0 var(--teal); }
+.row.gone { opacity: 0; transform: translateX(12px); }
+.word { font: 600 11px/1 var(--text); letter-spacing: .06em; text-transform: uppercase; padding: 4px 7px 3px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
+.word.P0 { background: var(--crimson-soft); color: var(--crimson); }
+.word.P1 { background: var(--copper-soft); color: var(--copper-2); }
+.word.P2 { background: var(--teal-soft); color: var(--teal-2); }
+.word.P3 { background: var(--surface-2); color: var(--ink-3); }
+.what { min-width: 0; display: grid; gap: 2px; }
+.title { font-weight: 600; font-size: 14.5px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+/* The title may ellipsize only when it is longer than the whole line; the
+   tag beside it wraps to the next line whole rather than clipping either. */
+.title > a, .title .plain { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title .repo { font-family: var(--mono); font-weight: 400; font-size: 12px; color: var(--ink-3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The tag is the filter it names: a button that reads as a tag until hovered. */
+.title button.repo { padding: 0; text-align: left; }
+.title button.repo:hover { color: var(--teal-2); text-decoration: underline dotted; text-underline-offset: 3px; }
+/* M3: where a row is from is its kind's business — a meeting says when it
+   starts, and reddens once it is inside the fifteen minutes. */
+.title .when { color: var(--ink-2); }
+.title .when.soon { color: var(--crimson); font-weight: 500; }
+.acts .join { border-color: var(--copper); color: var(--copper-2); }
+.acts .join:hover { background: var(--copper-soft); border-color: var(--copper); color: var(--copper-2); }
+.acts .join.primary { background: var(--join); border-color: var(--join); color: var(--on-join); }
+.acts .join.primary:hover { background: var(--copper); border-color: var(--copper); color: var(--on-join); }
+.why { font-size: 12.5px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.why .age { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+.why .wake { color: var(--copper-2); }
+.why .wake.due { color: var(--crimson); }
+.acts { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.acts a, .acts button { font: 500 12px var(--mono); padding: 4px 9px; border-radius: 999px; border: 1px solid var(--rule-2); color: var(--ink-2); background: var(--surface); }
+.acts a:hover, .acts button:hover { border-color: var(--teal); color: var(--teal-2); }
+/* the ask's own buttons: a choice each, or one Ack — the quick answers */
+.acts button.choice { border-color: var(--teal); color: var(--teal-2); }
+.title .plain { color: var(--ink); }
+.acts .done:hover { border-color: var(--teal); color: var(--teal-2); }
+/* One solid action per row; the rest stay outlined and one press away. */
+.acts .primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 600; }
+.acts .primary:hover { background: var(--teal); border-color: var(--teal); color: var(--on-primary); }
+/* Open and Join leave the page: say so on the still page, not only on click. */
+.acts a[target="_blank"]::after { content: "\2197"; margin-left: 4px; font-size: 11px; }
+.row.moved { animation: moved 1.4s ease-out; }
+@keyframes moved { 0%, 40% { background: var(--copper-ghost); border-color: var(--copper); } 100% { background: var(--surface); border-color: var(--rule); } }
+.acts .mute:hover { border-color: var(--crimson); color: var(--crimson); }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 999px; font: 12.5px var(--mono); box-shadow: var(--shadow); z-index: 30; }
+.toast.bad { background: var(--crimson); }
+
+/* ---- footer ---------------------------------------------------------- */
+.foot { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 12px 28px 26px; font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--rule); }
+.foot a { color: var(--teal-2); }
+.keys { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+@media (max-width: 720px) {
+  /* The columns are the nav's, below with the rest of it. */
+  .mast { gap: 8px 12px; padding: 10px 16px; }
+  /* The tiles are the tier filters now, so a phone keeps them: a second
+     line of the masthead, rather than nothing. Placed on that line, so the
+     brand, the nav, the pulse and the theme still share the first one. */
+  .glance { grid-row: 2; grid-column: 1 / -1; justify-self: start; }
+  .pulse { font-size: 11px; }
+  main { padding: 16px; }
+  .row { grid-template-columns: auto minmax(0, 1fr); }
+  .acts { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+
+/* M5: the top contributing term, beside the rule's reason — the sentence
+   that makes a blended rank explainable at all (plan §11.7 item 2). */
+.why .term { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.why .term:hover { color: var(--teal-2); }
+.why .term { padding: 0; }
+.why .term[aria-expanded="true"] { color: var(--teal-2); text-decoration-style: solid; }
+.what .detail { font: 11.5px/1.5 var(--mono); color: var(--ink-3); padding: 4px 0 0; }
+.empty .more { padding: 0; color: var(--teal-2); }
+.empty .more:hover { text-decoration: underline; }
+.controls { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 12.5px; color: var(--ink-2); }
+.controls select { font: inherit; color: inherit; background: transparent; border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; }
+.controls { flex-wrap: wrap; }
+/* The find box and the chips for what is narrowed: the rest of the question. */
+.controls .find { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.controls input[type="search"] { font: 12.5px var(--text); color: inherit; background: var(--surface); border: 1px solid var(--rule); border-radius: 999px; padding: 3px 10px; width: 160px; }
+.controls input[type="search"]:focus { outline: none; border-color: var(--teal); width: 220px; }
+.chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.chip { font: 500 12px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--teal); color: var(--teal-2); background: var(--teal-ghost); }
+.chip .x { margin-left: 6px; color: var(--ink-3); }
+.chip:hover { border-color: var(--crimson); color: var(--crimson); }
+.chip:hover .x { color: var(--crimson); }
+.controls .clear { font: 12px var(--mono); color: var(--ink-3); padding: 2px 4px; }
+.controls .clear:hover { color: var(--teal-2); }
+/* Only worth showing while something is narrowed. */
+.controls .clear { display: none; }
+.controls.narrowed .clear { display: inline; }
+
+/* ---- pages: the nav between the list and the stats -------------------- */
+.mast { grid-template-columns: auto auto 1fr auto auto; }
+.nav { display: flex; gap: 2px; font: 500 12px var(--mono); }
+.nav a { padding: 3px 9px; border-radius: 999px; color: var(--ink-3); }
+.nav a:hover { color: var(--teal-2); background: var(--surface-2); }
+.nav a[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
+
+/* ---- stats: the store over time (plan §15) ---------------------------
+   Two series only, ever: teal is the far end and the machine, copper is
+   you — the pair the list page already means by them, and the pair the
+   validator passes in both themes. Anything else is one hue light to
+   dark, or gray as the context a highlighted series sits against. */
+.stats main { max-width: 1180px; grid-template-columns: minmax(0, 1fr); }
+.stats main > * { min-width: 0; }
+.filters { flex-wrap: wrap; row-gap: 6px; }
+.presets { display: inline-flex; gap: 2px; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; background: var(--surface); }
+.presets button { font: 500 12px var(--mono); padding: 3px 10px; border-radius: 999px; color: var(--ink-2); }
+.presets button:hover { color: var(--teal-2); }
+.presets button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.filters .export { margin-left: auto; font: 500 12px var(--mono); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--teal); color: var(--teal-2); background: var(--surface); }
+.filters .export:hover { background: var(--teal-soft); }
+.chart figcaption .note a.json { color: var(--teal-2); text-decoration: underline dotted; text-underline-offset: 3px; }
+.chart figcaption .note a.json:hover { color: var(--teal); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.kpi { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); box-shadow: var(--shadow); padding: 12px 14px 10px; display: grid; gap: 2px; min-width: 0; }
+.kpi .label { font-size: 12px; color: var(--ink-3); }
+.kpi .value { font: 600 30px/1.1 var(--text); color: var(--ink); letter-spacing: -.02em; }
+.kpi .value small { font: 500 12px var(--mono); color: var(--ink-3); margin-left: 6px; letter-spacing: 0; }
+.kpi .sub { font: 11.5px var(--mono); color: var(--ink-3); }
+.kpi.you .value { color: var(--copper-2); }
+.kpi.machine .value { color: var(--teal-2); }
+.kpi.alarm .value { color: var(--crimson); }
+.report h2 { font-size: 19px; font-weight: 700; display: flex; gap: 10px; align-items: baseline; padding: 0 4px 8px; border-bottom: 2px solid var(--teal); flex-wrap: wrap; }
+.report h2 .muted { font-family: var(--text); font-size: 12.5px; }
+.report h2 select, .filters select { font: 500 12px var(--mono); color: var(--ink-2); background: var(--surface); border: 1px solid var(--rule); border-radius: 999px; padding: 3px 8px; }
+.report h2 .inline { font: 400 12px var(--text); color: var(--ink-3); margin-left: auto; }
+.charts { display: grid; gap: 14px; padding-top: 12px; }
+.charts.two { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.charts.three { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.chart { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); box-shadow: var(--shadow); padding: 12px 14px 10px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.chart figcaption { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.chart figcaption b { font: 600 13.5px var(--text); color: var(--ink); }
+.chart figcaption .note { font: 11.5px var(--mono); color: var(--ink-3); }
+.chart .lead { font-size: 12.5px; color: var(--ink-2); }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .grid line { stroke: var(--rule); stroke-width: 1; }
+.chart .axis text { font: 10.5px var(--mono); fill: var(--ink-3); font-variant-numeric: tabular-nums; }
+.chart .axis line { stroke: var(--rule-2); }
+.chart .mark { transition: opacity .12s; }
+.chart .mark.dim { opacity: .35; }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart .hit:focus-visible { outline: none; stroke: var(--teal); stroke-width: 1.5; }
+.chart .cross { stroke: var(--ink-3); stroke-width: 1; pointer-events: none; }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .area { opacity: .1; }
+.chart .end { stroke: var(--surface); stroke-width: 2; }
+.chart .dl { font: 500 10.5px var(--mono); fill: var(--ink-2); font-variant-numeric: tabular-nums; }
+.chart .cell { stroke: var(--surface); stroke-width: 2; }
+.chart .cell:hover, .chart .cell:focus-visible { stroke: var(--ink); outline: none; }
+.chart .bar-label { font: 12px var(--text); fill: var(--ink); }
+.chart .bar-label.small { font: 10.5px var(--mono); fill: var(--ink-3); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font: 11.5px var(--mono); color: var(--ink-2); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--sw); }
+.legend span.line::before { height: 2px; width: 14px; border-radius: 1px; vertical-align: 2px; }
+.chart details { font-size: 12px; color: var(--ink-3); }
+.chart details summary { cursor: pointer; font: 500 11.5px var(--mono); }
+.chart details summary:hover { color: var(--teal-2); }
+.chart table { border-collapse: collapse; width: 100%; margin-top: 6px; font: 11.5px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.chart th, .chart td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.chart th:first-child, .chart td:first-child { text-align: left; }
+.chart th { color: var(--ink-3); font-weight: 500; }
+.chart .tablewrap { max-height: 260px; overflow: auto; }
+.chart .empty { color: var(--ink-3); font-size: 12.5px; padding: 18px 0; text-align: center; }
+.chart .thin { font: 11.5px var(--mono); color: var(--copper-2); }
+.tip { position: fixed; z-index: 40; pointer-events: none; background: var(--ink); color: var(--paper); border-radius: 8px; padding: 7px 10px; font: 11.5px/1.5 var(--mono); box-shadow: var(--shadow); max-width: 280px; }
+.tip b { color: var(--paper); font-weight: 600; }
+.tip .k { color: color-mix(in oklab, var(--paper) 70%, transparent); }
+.tip .row { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; }
+.tip .row i { display: inline-block; width: 12px; height: 2px; margin-right: 6px; vertical-align: 3px; background: var(--sw); }
+.chart.loading { opacity: .55; }
+@media (max-width: 720px) {
+  .mast { grid-template-columns: auto auto 1fr auto; }
+  .nav { justify-self: start; }
+  .stats .pulse { display: none; }
+  .stats .theme { justify-self: end; }
+  .report h2 .inline { margin-left: 0; }
+}

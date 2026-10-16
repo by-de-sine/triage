@@ -1,0 +1,12 @@
+node_modules/
+*.db
+*.db-*
+.env
+# Config and credentials that default to living beside the .env — which, in a
+# worktree, is inside this checkout. Nothing is read from the repo (AGENTS.md),
+# and the way that stays true is that none of it can be committed.
+preferences.json
+google-oauth.json
+google-token.json
+/agent/
+/log/

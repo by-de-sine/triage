@@ -1,0 +1,10 @@
+{
+  "interrupts": {
+    "github": ["+new_issue"],
+    "calendar": "off"
+  },
+  "projects": {
+    "acme/*":        { "weight": 0.6, "interrupts": { "github": ["+comment_on_my_thread"] } },
+    "alice/scratch": { "weight": -0.5, "interrupts": "off" }
+  }
+}
