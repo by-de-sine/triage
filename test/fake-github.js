@@ -1,6 +1,6 @@
 // A GitHubApi stand-in: routes to fixtures, counts calls, answers 304 when
 // asked with the Last-Modified it last sent.
-import { GitHubApi } from '../lib/github-api.js';
+import { GitHubApi } from '../lib/forge-api.js';
 
 export function fakeApi(routes, { pollInterval = 60, lastModified = 'Mon, 01 Sep 2026 00:00:00 GMT' } = {}) {
   const calls = [];

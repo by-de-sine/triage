@@ -4,7 +4,8 @@ import { Store } from '../lib/store.js';
 import { createActor, parseUntil } from '../lib/actions.js';
 import { ingest, wake } from '../lib/pipeline.js';
 import { score } from '../lib/rules.js';
-import rules from '../rules/github.js';
+import rules from '../rules/thread.js';
+import github from '../sources/github.js';
 
 const ME = 'alice';
 const NOW = new Date('2026-09-08T12:00:00Z');
@@ -17,6 +18,8 @@ function fakeGithub(fail = null) {
   const calls = [];
   return { calls, request: async (method, url) => { calls.push([method, url]); if (fail) throw fail; return { status: 205, body: null }; } };
 }
+/** What server.js builds: the source's own `mark`, handed its client. */
+const marksFor = (api) => ({ github: (item) => github.mark(item, { api }) });
 
 test('until accepts durations and future ISO times, refuses the past and nonsense', () => {
   assert.equal(parseUntil('1h', NOW), '2026-09-08T13:00:00.000Z');
@@ -33,7 +36,7 @@ test('done sets the state, marks the GitHub thread read, and records both', asyn
   const item = seed(store);
   const github = fakeGithub();
   const reflected = [];
-  const act = createActor({ store, github, deliver: { reflect: async (r) => reflected.push(r) }, now: () => NOW });
+  const act = createActor({ store, marks: marksFor(github), deliver: { reflect: async (r) => reflected.push(r) }, now: () => NOW });
   const r = await act({ id: item.id, action: 'done', by: 'slack' });
   assert.equal(r.item.state, 'done');
   assert.equal(r.marked, 'marked read');
@@ -48,7 +51,7 @@ test('done still lands locally when GitHub refuses, and says why', async () => {
   const store = new Store();
   const item = seed(store);
   const logs = [];
-  const act = createActor({ store, github: fakeGithub(Object.assign(new Error('GitHub 403 on PATCH …: Resource not accessible'), { status: 403 })), now: () => NOW, log: (m) => logs.push(m) });
+  const act = createActor({ store, marks: marksFor(fakeGithub(Object.assign(new Error('GitHub 403 on PATCH …: Resource not accessible'), { status: 403 }))), now: () => NOW, log: (m) => logs.push(m) });
   const r = await act({ id: item.id, action: 'done' });
   assert.equal(r.item.state, 'done');
   assert.match(r.marked, /not marked read: GitHub 403 .* notifications scope/);

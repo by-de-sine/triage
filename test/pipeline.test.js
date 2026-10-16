@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../lib/store.js';
 import { ingest } from '../lib/pipeline.js';
-import rules from '../rules/github.js';
+import rules from '../rules/thread.js';
 
 const ME = 'alice';
 const batch = (events, over = {}) => ({ item: { key: 'o/r#1', kind: 'pull', title: 'T', url: 'u', repo: 'o/r', actors: [], my_role: 'subscribed', last_activity: '2026-09-01T02:00:00Z', last_seen: '2026-09-01T02:00:00Z', ...over }, events });

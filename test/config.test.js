@@ -62,6 +62,24 @@ test('TRIAGE_ISSUES is a list of repositories, not an inference; a bad entry is 
   assert.deepEqual(cfg({ TRIAGE_ISSUES: 'o/r, O/R' }).github.issues.repos, ['o/r'], 'one repository, one read');
 });
 
+test('the forges: TRIAGE_GITHUB_ISSUES is the name and TRIAGE_ISSUES its alias; GitLab has its own block; a mode is on, off or refused', () => {
+  const c = cfg({ TRIAGE_GITHUB_ISSUES: 'o/r', TRIAGE_ISSUES: 'ignored/when-the-new-name-is-set', TRIAGE_GITLAB_ISSUES: 'acme/platform, https://gitlab.com/acme/platform/sub/', GITLAB_TOKEN: 'glpat', GITLAB_USER: 'alice', TRIAGE_GITLAB_URL: 'https://git.example.com/' });
+  assert.deepEqual(c.github.issues.repos, ['o/r']);
+  assert.deepEqual(c.gitlab.issues.projects, ['acme/platform', 'acme/platform/sub'], 'a GitLab path may nest');
+  assert.equal(c.gitlab.token, 'glpat');
+  assert.equal(c.gitlab.user, 'alice');
+  assert.equal(c.gitlab.base, 'https://git.example.com');
+  assert.equal(c.gitlab.mode, null, 'unset: on if a token resolves');
+  assert.equal(cfg().gitlab.base, 'https://gitlab.com');
+  assert.equal(cfg().github.base, 'https://api.github.com');
+  assert.equal(cfg({ TRIAGE_GITHUB_URL: 'https://github.example.com/api/v3/' }).github.base, 'https://github.example.com/api/v3');
+  assert.equal(cfg({ TRIAGE_GITHUB: 'off' }).github.mode, 'off');
+  assert.equal(cfg({ TRIAGE_GITLAB: 'ON' }).gitlab.mode, 'on');
+  assert.throws(() => cfg({ TRIAGE_GITLAB: 'fake' }), /TRIAGE_GITLAB must be off, on/);
+  assert.throws(() => cfg({ TRIAGE_GITHUB_ISSUES: 'a/b/c' }), /TRIAGE_GITHUB_ISSUES: a\/b\/c is not owner\/name/, 'GitHub does not nest');
+  assert.throws(() => cfg({ TRIAGE_GITLAB_ISSUES: 'platform' }), /TRIAGE_GITLAB_ISSUES: platform is not group\/project/);
+});
+
 // ---------------------------------------------------------------------------
 // The preferences file (plan §14.4): layers 1, 2 and 4 of what interrupts
 // you, and what a project is worth. Named by the environment, never read
@@ -82,7 +100,7 @@ test('no preferences file is the normal case, and costs nothing', () => {
   const c = cfg();
   assert.equal(c.prefs, null);
   assert.equal(c.prefsFile, null);
-  assert.deepEqual(c.slack.interrupts.set, { github: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'], calendar: ['starts_in_15_min', 'new_invitation'], crm: ['handed_to_me', 'changed_on_my_task', 'crm_unread'] });
+  assert.deepEqual(c.slack.interrupts.set, { github: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'], gitlab: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'], calendar: ['starts_in_15_min', 'new_invitation'], crm: ['handed_to_me', 'changed_on_my_task', 'crm_unread'] });
   assert.deepEqual(c.rank.prefer, []);
 });
 

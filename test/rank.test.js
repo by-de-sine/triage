@@ -8,7 +8,7 @@ import { Store } from '../lib/store.js';
 import { Ranker, SHAPES, parsePreferences, rerank, DEFAULT_WEIGHTS } from '../lib/rank.js';
 import { backfill } from '../lib/backfill.js';
 import { ingest } from '../lib/pipeline.js';
-import githubRules from '../rules/github.js';
+import githubRules from '../rules/thread.js';
 import githubSource from '../sources/github.js';
 import calendarSource from '../sources/calendar.js';
 import calendarRules from '../rules/calendar.js';

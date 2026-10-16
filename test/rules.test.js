@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { decide, score } from '../lib/rules.js';
-import rules from '../rules/github.js';
+import rules from '../rules/thread.js';
 
 const ME = 'alice';
 let n = 0;

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// triage — your queue, tiered. GitHub notifications in (sources/), tiered
-// items out (rules/), the urgent ones in Slack (deliver/). One process,
-// one SQLite file, an HTTP API on 127.0.0.1 that Caddy publishes at
-// triage.<zone>. See README.md.
+// triage — your queue, ranked. Sources in (sources/), verdicts out (rules/),
+// the few that interrupt to Slack (deliver/), everything in one ordered
+// list on a page. One process, one SQLite file, an HTTP API on 127.0.0.1
+// that a reverse proxy publishes. See README.md.
 import http from 'node:http';
 import { Store } from './lib/store.js';
 import { loadConfig } from './lib/config.js';
-import { GitHubApi, defaultToken } from './lib/github-api.js';
+import { GitHubApi, GitLabApi, githubToken, gitlabToken } from './lib/forge-api.js';
 import { Runner } from './lib/runner.js';
 import { createApp } from './lib/api.js';
 import { SlackDelivery } from './deliver/slack.js';
@@ -15,7 +15,8 @@ import { Ranker } from './lib/rank.js';
 import { backfill } from './lib/backfill.js';
 import { GoogleApi, readCredentials } from './lib/google-api.js';
 import github from './sources/github.js';
-import githubRules from './rules/github.js';
+import gitlab from './sources/gitlab.js';
+import threadRules from './rules/thread.js';
 import calendar from './sources/calendar.js';
 import calendarRules from './rules/calendar.js';
 import ledger from './sources/ledger.js';
@@ -27,27 +28,57 @@ import crm from './sources/crm.js';
 import crmRules from './rules/crm.js';
 import { TwentyApi } from './lib/twenty-api.js';
 import { existsSync } from 'node:fs';
+import { sameLogin } from './lib/util.js';
 
 const log = (m) => console.error(`${new Date().toISOString()} triage: ${m}`);
 const cfg = loadConfig();
-
-const token = await defaultToken(process.env);
-if (!token) { log('no GitHub token: set GITHUB_TOKEN or log gh in'); process.exit(1); }
-const api = new GitHubApi({ token, tokensDir: cfg.github.tokensDir });
-let user = cfg.github.user;
-if (!user) {
-  try { user = (await api.get('/user')).body.login; } catch (e) { log(`GET /user failed: ${e.message}`); process.exit(1); }
-}
-log(`items belong to ${user}; store ${cfg.db}; env ${cfg.envFile}; commit ${cfg.commit || 'unknown'}`);
-
 const store = new Store(cfg.db);
 
-// Issues as state (plan §12.3 item 2): the inbox carries none, so the open
-// set of each repository TRIAGE_ISSUES names is read whole and reconciled.
-// Which repositories is yours to say, as config (§12.7); unset, the source
-// is the inbox alone, and says so.
-if (cfg.github.issues.repos.length) log(`github: open issues as state from ${cfg.github.issues.repos.join(', ')}, every ${Math.round(cfg.github.issues.everyMs / 60_000)} min`);
-else log('github: issues as state off — TRIAGE_ISSUES names no repository');
+// The forges (plan §16, G1). Each registers when its token resolves — or
+// `TRIAGE_<FORGE>=on` insists and fails loudly without one; `off` never
+// registers it — and says at boot who you are there, resolved once through
+// the source's own `whoami`. One thread-shaped rule set serves both,
+// because a reply on GitLab is the same observation as a reply on GitHub.
+const sources = [], extras = {}, rules = {}, identity = {};
+async function forge(name, source, c, Api, tokenOf, apiOpts = {}) {
+  const NAME = name.toUpperCase();
+  if (c.mode === 'off') { log(`${name}: off (TRIAGE_${NAME}=off)`); return null; }
+  const token = c.token || await tokenOf(process.env);
+  if (!token) {
+    log(`${name}: off — no ${NAME}_TOKEN${c.mode === 'on' ? ` (TRIAGE_${NAME}=on)` : ''}${name === 'github' ? ' and nothing from `gh auth token`' : name === 'gitlab' ? ' and nothing from `glab auth token`' : ''}`);
+    if (c.mode === 'on') process.exit(1);
+    return null;
+  }
+  const api = new Api({ base: c.base, token, ...apiOpts });
+  let me;
+  try { me = await source.whoami({ api, user: c.user }); }
+  catch (e) {
+    // A forge that is merely available — not insisted on — must not stop
+    // the box: a stale `glab` token for the wrong instance, or an outage
+    // at boot, is that forge off until the next restart, said out loud.
+    log(`${name}: off — cannot resolve who you are at ${api.base} (${e.message}); set ${NAME}_USER${c.mode === 'on' ? '' : `, or TRIAGE_${NAME}=off`}`);
+    if (c.mode === 'on') process.exit(1);
+    return null;
+  }
+  const watched = c.issues.repos || c.issues.projects || [];
+  sources.push(source);
+  extras[name] = { api, all: c.all, issues: c.issues };
+  identity[name] = me;
+  rules[name] = threadRules;
+  // Issues as state (plan §12.3 item 2): the inbox carries none, so the open
+  // set of each listed repository is read whole and reconciled. Which ones
+  // is yours to say, as config (§12.7); unset, the source is the inbox alone.
+  log(`${name}: ${api.base} as ${me}${watched.length ? `; open issues as state from ${watched.join(', ')} every ${Math.round(c.issues.everyMs / 60_000)} min` : '; issues as state off — no repository named'}`);
+  return api;
+}
+await forge('github', github, cfg.github, GitHubApi, githubToken, { tokensDir: cfg.github.tokensDir });
+await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken);
+// The one person the items belong to: `items.user`, which scopes every
+// read. Whoever the store already files items under, so that adding a
+// forge later never re-keys a queue; on an empty store, the GitHub login
+// when GitHub is on, else the GitLab username.
+const user = store.firstUser() ?? identity.github ?? identity.gitlab ?? null;
+if (user && Object.values(identity).length && !Object.values(identity).some((me) => sameLogin(me, user))) log(`items belong to ${user} (the store's), which is none of this boot's identities (${Object.entries(identity).map(([k, v]) => `${k}: ${v}`).join(', ')}) — set TRIAGE_DB to start a queue of your own`);
 
 // M3: the second source. It registers only when it can actually read a
 // calendar — a Google OAuth client and a refresh token are ring-0 work
@@ -65,7 +96,13 @@ const hass = await haSource(cfg.ha, log);
 // The CRM (plan §12.3 item 3): Twenty's tasks as state, and anybody else's
 // change as an event; read-only, on its own key, and off unless configured.
 const twenty = await crmSource(cfg.crm, log);
-const sources = [github, ...(cal ? [calendar] : []), ...(led ? [ledger] : []), ...(hass ? [ha] : []), ...(twenty ? [crm] : [])];
+if (cal) { sources.push(calendar); rules.calendar = calendarRules; }
+if (led) { sources.push(ledger); rules.ledger = ledgerRules; }
+if (hass) { sources.push(ha); rules.ha = haRules; }
+if (twenty) { sources.push(crm); rules.crm = crmRules; }
+if (!sources.length) { log('no source is configured: set GITHUB_TOKEN (or log gh in), GITLAB_TOKEN, or one of the other sources'); process.exit(1); }
+if (!user) { log(`items belong to nobody: no forge is on, so there is no login to file them under — set GITHUB_TOKEN or GITLAB_TOKEN`); process.exit(1); }
+log(`items belong to ${user}; store ${cfg.db}; env ${cfg.envFile}; commit ${cfg.commit || 'unknown'}`);
 
 // The one action path: the Slack buttons, POST /api/items/:id/act and the
 // page all call this. What Done does *outside* triage is per source: the
@@ -87,30 +124,34 @@ log(`slack: interrupts on ${Object.entries(deliver.interruptMap).map(([k, v]) =>
 // somebody, and the first real P0 this system sent proved it the hard way.
 if (cfg.slack.mode === 'webhook') log(`slack: interrupts ${cfg.slack.mention ? `mention ${cfg.slack.mention} — so Slack notifies, not just delivers` : 'mention nobody (TRIAGE_MENTION unset or off): a channel message is an unread badge, not a push'}`);
 
-const act = createActor({ store, github: api, marks: {
+// What Done does outside triage, per source: a map keyed by source name,
+// never a branch in act(). A source that declares `mark` supplies its own
+// entry (the forges: the thread read, the todo done); the rest are the
+// sentences for what a read-only source does about it.
+const marks = {
   calendar: async () => 'nothing marked on Google — triage only reads your calendar',
   ledger: async () => 'nothing changed in the ledger — triage only reads it; the row closes when whoever owns it deletes it',
-  // The one write this process makes outside its own store: Done here ticks
-  // the item off on the kitchen screen too, or says why it could not. The
-  // entry is here even when the source is off, because the default answer —
+  // The one write this process makes outside its own store. The entry is
+  // here even when the source is off, because the default answer —
   // `ha is read-only here` — would be a lie: it is not read-only, it is
   // unconfigured, and an item from an earlier run is still in the store.
   ha: hass ? markDone(hass) : async () => 'nothing ticked off: the Home Assistant source is off (TRIAGE_HA), so there is nothing to write to',
-}, deliver, rank, log });
+  ...Object.fromEntries(sources.filter((s) => s.mark).map((s) => [s.name, (item) => s.mark(item, { ...(extras[s.name] || {}), me: identity[s.name] ?? user })])),
+};
+const act = createActor({ store, marks, deliver, rank, log });
 await deliver.start({ act });
-const rules = { github: githubRules, calendar: calendarRules, ledger: ledgerRules, ha: haRules, crm: crmRules };
 // M5's bootstrap, once, bounded: the backlog predates every feature the
 // ranker wants and nothing else will ever compute one for it (plan §11.8).
 // Rules re-run from stored history; a feature nobody can know stays absent.
 if (cfg.rank.backfill) {
-  const b = backfill(store, { user, rules, rank, limit: cfg.rank.backfill, log });
+  const b = backfill(store, { user, identity, rules, rank, limit: cfg.rank.backfill, log });
   if (!b.ranked) log(`rank: nothing to backfill (${store.countUnranked(user)} unranked)`);
 }
 const runner = new Runner(store, sources, {
-  user,
+  user, identity,
   rules,
   deliver, rank,
-  extras: { github: { api, all: cfg.github.all, issues: cfg.github.issues }, calendar: { api: cal, calendarId: cfg.calendar.id, windowMs: cfg.calendar.windowMs, soonMs: cfg.calendar.soonMs }, ledger: led || {}, ha: { api: hass, lists: cfg.ha.lists, dashboard: cfg.ha.dashboard },
+  extras: { ...extras, calendar: { api: cal, calendarId: cfg.calendar.id, windowMs: cfg.calendar.windowMs, soonMs: cfg.calendar.soonMs }, ledger: led || {}, ha: { api: hass, lists: cfg.ha.lists, dashboard: cfg.ha.dashboard },
     // `health` is the one mutable thing in an extras block: the source writes
     // the last read's error into it and its clock half reads it back, so the
     // alarm for a CRM that never answers can say why. `startedAt` is when
@@ -118,7 +159,7 @@ const runner = new Runner(store, sources, {
     crm: { api: twenty, url: twenty?.url || null, self: cfg.crm.self, agents: cfg.crm.agents, projects: cfg.crm.projects, staleMs: cfg.crm.staleMs, health: { startedAt: new Date().toISOString(), error: null } } },
   log,
 });
-const app = createApp({ store, runner, deliver, act, rank, rules, user, commit: cfg.commit, tz: cfg.slack.tz, log });
+const app = createApp({ store, runner, deliver, act, rank, rules, user, identity, commit: cfg.commit, tz: cfg.slack.tz, log });
 const server = http.createServer(app);
 server.listen(cfg.port, cfg.host, () => { log(`listening on http://${cfg.host}:${cfg.port}`); runner.start(); });
 

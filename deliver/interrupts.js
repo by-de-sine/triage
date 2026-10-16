@@ -56,6 +56,9 @@ export const INTERRUPTS = {
   // request in a repository you follow is waiting for feedback whether
   // or not they remembered to request a review.
   github: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'],
+  // The same observations on the other forge (plan §16, G1): one thread
+  // rule set, so one interrupt set.
+  gitlab: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'],
   calendar: ['starts_in_15_min', 'new_invitation'],
   // Plan §12.3 item 3. The first call (2026-10-02) was every edit by
   // somebody else; its first busy afternoon (2026-10-15) was nine posts in
