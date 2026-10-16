@@ -424,3 +424,53 @@ test('TRIAGE_CALENDAR=fake is the feed: the canned day has one of each thing the
   assert.ok(!r.batches.some((b) => b.item.key === 'demo-far'), 'a week out is not in the window');
   assert.equal(calendar.due({ items: r.batches.map((b) => b.item), now: FNOW }).batches.map((b) => b.item.key).join(), 'demo-soon', 'the design review is the alarm');
 });
+
+test('the feed: a change undone is still a change — 10:00, 11:00, 10:00 are three events, the revision kept in the cursor', async () => {
+  const at10 = ics([{ uid: 'm', summary: 'Sync', start: fat(60), organizer: ann, attendees: [alice(), ann] }]);
+  const at11 = ics([{ uid: 'm', summary: 'Sync', start: fat(120), organizer: ann, attendees: [alice(), ann] }]);
+  const a = await fpoll({ text: at10 });
+  const b = await fpoll({ text: at11 }, a.cursor);
+  const c = await fpoll({ text: at10 }, b.cursor);
+  const keys = [a, b, c].map((r) => r.batches[0]?.events[0].key);
+  assert.equal(new Set(keys).size, 3, keys.join(' · '));
+  assert.deepEqual(c.cursor.revisions.m.n, 3);
+  assert.deepEqual((await fpoll({ text: at10 }, c.cursor)).batches, [], 'and unchanged is still nothing');
+  // A revision outlives the instance leaving the window, so a return counts on.
+  const gone = await fpoll({ text: ics([]) }, c.cursor);
+  assert.equal(gone.cursor.revisions.m.n, 3);
+  const back = await fpoll({ text: at10 }, gone.cursor);
+  assert.ok(!keys.includes(back.batches[0].events[0].key));
+});
+
+test('the feed over HTTP: a redirect is followed by hand, to https only and at most five times; the body is cut off at the size limit', async () => {
+  const feedText = feedOf();
+  const hops = [];
+  const routes = {
+    'https://p01.example.com/published/s3cr3t': { status: 301, location: 'https://p42.example.com/published/s3cr3t' },
+    'https://p42.example.com/published/s3cr3t': { status: 200, body: feedText },
+    'https://down.example.com/s3cr3t': { status: 302, location: 'http://plain.example.com/s3cr3t' },
+    'https://loop.example.com/s3cr3t': { status: 307, location: '/s3cr3t' },
+  };
+  const fetch = async (url, { redirect }) => {
+    hops.push(url);
+    assert.equal(redirect, 'manual', 'never fetch\'s own following');
+    const r = routes[url];
+    return { ok: r.status < 300, status: r.status, headers: new Headers(r.location ? { location: r.location } : {}), text: async () => r.body || '' };
+  };
+  const ok = await fpoll({ url: 'https://p01.example.com/published/s3cr3t' }, null, { fetch });
+  assert.match(ok.status, /^fetched — 7 entries/);
+  assert.deepEqual(hops, ['https://p01.example.com/published/s3cr3t', 'https://p42.example.com/published/s3cr3t'], 'iCloud-style: the partition the calendar lives on');
+  const down = await fpoll({ url: 'https://down.example.com/s3cr3t' }, null, { fetch });
+  assert.equal(down.status, 'feed not read: the feed redirected to http://plain.example.com — only https is followed');
+  const loop = await fpoll({ url: 'https://loop.example.com/s3cr3t' }, null, { fetch });
+  assert.equal(loop.status, 'feed not read: the feed redirected more than 5 times');
+  for (const r of [down, loop]) assert.doesNotMatch(JSON.stringify([r.status, r.cursor]), /s3cr3t/);
+  // A body with no Content-Length, larger than the limit: read until it
+  // passes, then abandoned — not held whole and measured after.
+  let pulled = 0;
+  const MB = new Uint8Array(1024 * 1024).fill(65);
+  const huge = new ReadableStream({ pull(ctrl) { pulled++; ctrl.enqueue(MB); } });
+  const big = await fpoll({ url: 'https://big.example.com/x.ics' }, null, { fetch: async () => new Response(huge, { status: 200 }) });
+  assert.equal(big.status, 'feed not read: the feed is larger than 20 MB');
+  assert.ok(pulled <= 22, `stopped at the limit (${pulled} MB pulled)`);
+});

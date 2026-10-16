@@ -106,3 +106,17 @@ test('a conference link is found in the properties, then in the text', () => {
   assert.equal(joinLink(parseIcs(vevent({ uid: 'y', start: '2026-09-02T12:00:00Z', join: 'https://meet.google.com/abc' })).events[0]), 'https://meet.google.com/abc');
   assert.equal(joinLink(parseIcs(vevent({ uid: 'z', start: '2026-09-02T12:00:00Z' })).events[0]), null);
 });
+
+test('an all-day entry ends at the next local midnight, even on the day the clocks change', () => {
+  const tz = 'America/New_York';
+  const day = (ms) => { const p = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms)); return p; };
+  // 3 November 2024 is 25 hours long in New York.
+  const implicit = instances(parseIcs(ics(['BEGIN:VEVENT\r\nUID:a\r\nDTSTART;VALUE=DATE:20241103\r\nSUMMARY:Fall back\r\nEND:VEVENT'])).events, { fromMs: Date.UTC(2024, 10, 1), toMs: Date.UTC(2024, 10, 6), tz });
+  assert.deepEqual(implicit.map((i) => [day(i.start), day(i.end)]), [['2024-11-03', '2024-11-04']], 'no DTEND: one local day, not 24 h');
+  // A weekly all-day entry with an explicit one-day DTEND, whose one
+  // occurrence on that Sunday must still end on Monday.
+  const weekly = instances(parseIcs(ics(['BEGIN:VEVENT\r\nUID:w\r\nDTSTART;VALUE=DATE:20241020\r\nDTEND;VALUE=DATE:20241021\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\nSUMMARY:Sundays\r\nEND:VEVENT'])).events, { fromMs: Date.UTC(2024, 10, 2), toMs: Date.UTC(2024, 10, 4), tz });
+  assert.deepEqual(weekly.map((i) => [day(i.start), day(i.end)]), [['2024-11-03', '2024-11-04']]);
+  const twoDays = instances(parseIcs(ics(['BEGIN:VEVENT\r\nUID:d\r\nDTSTART;VALUE=DATE:20241102\r\nDURATION:P2D\r\nSUMMARY:Away\r\nEND:VEVENT'])).events, { fromMs: Date.UTC(2024, 10, 1), toMs: Date.UTC(2024, 10, 6), tz });
+  assert.deepEqual(twoDays.map((i) => [day(i.start), day(i.end)]), [['2024-11-02', '2024-11-04']], 'a DURATION in days is days');
+});

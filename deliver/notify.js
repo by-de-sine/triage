@@ -20,6 +20,8 @@
 // the store, a log line, an error message or the API; `describe()` and the
 // boot log get the host and nothing else.
 
+import { isLoopback } from '../lib/util.js';
+
 export const MODES = ['off', 'slack', 'discord', 'generic'];
 
 /** How long a post may take before it is abandoned. `deliver` is awaited
@@ -70,13 +72,9 @@ export function parseMention(mode, v) {
   throw new Error(`TRIAGE_MENTION: "${m}" is not something Slack notifies on — a user id (U…/W…), a user group (S…), !here, !channel, or off`);
 }
 
-/** Hosts allowed to be plain `http:`. A worktree proves delivery against a
- *  listener it starts on 127.0.0.1, and that is the only reason http exists
- *  here; anything else must be https, because the URL is the credential and
- *  the payload is the contents of private work. Syntactic on purpose — no
- *  DNS lookup, so nothing here can be steered by a resolver. */
-const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|::1|0:0:0:0:0:0:0:1)$/i;
-export const isLoopback = (url) => { try { return LOOPBACK.test(new URL(url).hostname.replace(/^\[|\]$/g, '')); } catch { return false; } };
+// `isLoopback` lives in lib/util.js (the calendar's feed asks it too) and is
+// re-exported here, where the webhook's callers have always found it.
+export { isLoopback };
 
 /** Failure reasons Slack and Discord send that are safe to repeat; any
  *  other body is untrusted text that would land in a log line, and is

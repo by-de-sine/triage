@@ -46,7 +46,7 @@
 // re-poll and a second `due` in the same minute all re-emit nothing.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { oneLine } from '../lib/util.js';
+import { oneLine, isLoopback } from '../lib/util.js';
 import { parseIcs, instances, text, prop, address, joinLink, partsIn, ymd } from '../lib/ics.js';
 
 export const WINDOW_MS = 48 * 3_600_000;    // items are events starting in this
@@ -288,6 +288,8 @@ export default {
 const DAY = 86_400_000;
 export const FETCH_MS = 5 * 60_000;           // a URL is fetched at most this often
 export const MAX_FEED_BYTES = 20 * 1024 * 1024;
+const MAX_REDIRECTS = 5;
+const REVISION_KEEP_MS = 30 * DAY;            // how long a revision outlives its instance leaving the window
 const sha = (x) => createHash('sha1').update(x).digest('hex').slice(0, 12);
 // What a 304, or a poll inside FETCH_MS, re-reads: per feed object, so two
 // tests (or two feeds) never share one. Lost on a restart, and then the
@@ -310,7 +312,7 @@ function isoOf(v) {
  *  and `UID@<occurrence>` for one occurrence of a recurring event; the
  *  event key hashes what a rule reads, so a reschedule, a cancellation or
  *  an answer re-tiers it and an unchanged feed emits nothing. */
-export function normaliseInstance(inst, { me = '', calendarId = 'calendar' } = {}) {
+export function normaliseInstance(inst, { me = '', calendarId = 'calendar', revision = null } = {}) {
   const { ev, uid, start, end, allDay, recurrenceId, tz } = inst;
   const mine = addresses(me);
   const org = prop(ev, 'ORGANIZER');
@@ -352,7 +354,10 @@ export function normaliseInstance(inst, { me = '', calendarId = 'calendar' } = {
   };
   const hash = sha(JSON.stringify([title, startIso, endIso, status, location, response, guests, item.data.join, organizer, owned, calendarId]));
   const kind = status === 'cancelled' ? 'cancelled' : (response === 'needsAction' && !owned) ? 'invite' : 'update';
-  const events = [{ key: `calendar:${key}:${hash}`, ts: changed, kind, actor: organizer, body: text(ev, 'DESCRIPTION') ? oneLine(text(ev, 'DESCRIPTION'), 600) : null, url: item.url, data: { start: startIso, all_day: allDay, response, guests, status } }];
+  // The revision is how many times this instance's hash has moved, kept in
+  // the cursor: without it a change undone (10:00 → 11:00 → 10:00) would
+  // repeat the first state's key and be dropped as already seen.
+  const events = [{ key: `calendar:${key}:${hash}${revision != null ? `:${revision}` : ''}`, ts: changed, kind, actor: organizer, body: text(ev, 'DESCRIPTION') ? oneLine(text(ev, 'DESCRIPTION'), 600) : null, url: item.url, data: { start: startIso, all_day: allDay, response, guests, status } }];
   return { item, events, hash };
 }
 
@@ -367,18 +372,54 @@ async function readFeed(feed, { now, fetchMs, fetch }) {
   const headers = { accept: 'text/calendar, */*;q=0.5', 'user-agent': 'triage' };
   if (c?.etag) headers['if-none-match'] = c.etag;
   if (c?.last_modified) headers['if-modified-since'] = c.last_modified;
-  const res = await fetch(feed.url, { headers, signal: AbortSignal.timeout(30_000) });
+  // Redirects are followed by hand, at most five, and **only to https** (or
+  // loopback, for a listener of your own): fetch's own following would take
+  // an https feed to plain http without a word. Not refused outright,
+  // because real feeds redirect — iCloud's `webcal` address answers with
+  // the partition that holds the calendar. Nothing secret travels with the
+  // hop: the secret is the original path, and only the server's answer is
+  // followed.
+  const signal = AbortSignal.timeout(30_000);
+  let url = feed.url, res;
+  for (let hop = 0; ; hop++) {
+    res = await fetch(url, { headers, redirect: 'manual', signal });
+    if (res.status < 300 || res.status >= 400 || res.status === 304) break;
+    const loc = res.headers.get('location');
+    if (!loc) throw new Error(`the feed answered HTTP ${res.status} with no Location`);
+    if (hop >= MAX_REDIRECTS) throw new Error(`the feed redirected more than ${MAX_REDIRECTS} times`);
+    const next = new URL(loc, url);
+    if (next.protocol !== 'https:' && !(next.protocol === 'http:' && isLoopback(next.href))) throw new Error(`the feed redirected to ${next.protocol}//${next.host} — only https is followed`);
+    url = next.href;
+  }
   // The status and nothing else: the URL is the credential, and it is never
   // in a message, a log line or the cursor.
   if (res.status === 304 && c) { fetched.set(feed, { ...c, at: now.getTime() }); return { ...c, how: 'not modified' }; }
   if (!res.ok) throw new Error(`the feed answered HTTP ${res.status}`);
   if (Number(res.headers.get('content-length')) > MAX_FEED_BYTES) throw new Error(`the feed is larger than ${MAX_FEED_BYTES >> 20} MB`);
-  const body = await res.text();
-  if (body.length > MAX_FEED_BYTES) throw new Error(`the feed is larger than ${MAX_FEED_BYTES >> 20} MB`);
+  const body = await boundedText(res, MAX_FEED_BYTES);
   if (!/BEGIN:VCALENDAR/i.test(body.slice(0, 4096))) throw new Error('the feed is not a calendar (no BEGIN:VCALENDAR)');
   const out = { text: body, etag: res.headers.get('etag'), last_modified: res.headers.get('last-modified'), at: now.getTime() };
   fetched.set(feed, out);
   return { ...out, how: 'fetched' };
+}
+
+/** A response body as text, abandoned the moment it passes `max` bytes
+ *  rather than held whole and measured after — a feed that does not send
+ *  Content-Length is otherwise as large as it likes. */
+async function boundedText(res, max) {
+  const tooBig = () => new Error(`the feed is larger than ${max >> 20} MB`);
+  const reader = res.body?.getReader?.();
+  if (!reader) { const t = await res.text(); if (Buffer.byteLength(t) > max) throw tooBig(); return t; }
+  const chunks = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) { await reader.cancel().catch(() => {}); throw tooBig(); }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 /** One poll of the feed. Expands the window — from a day back, so a meeting
@@ -399,15 +440,25 @@ export async function pollFeed({ feed, cursor, me = '', now = new Date(), window
   const { events, name } = parseIcs(r.text);
   const id = calendarId || name || feed.name || 'calendar';
   const old = prev.hashes || {};
+  // Each instance's revision — `{ n, at }`, the count of hash changes and
+  // when it was last in the window — outlives the instance leaving the
+  // window by a month, so one that is moved out and back counts on from
+  // where it was rather than repeating a key it has used.
+  const revisions = {};
+  for (const [k, r] of Object.entries(prev.revisions || {})) if (t - Date.parse(r.at) <= REVISION_KEEP_MS) revisions[k] = r;
   const hashes = {}, batches = [];
   for (const inst of instances(events, { fromMs: t - DAY, toMs: t + windowMs, tz })) {
-    const b = normaliseInstance(inst, { me, calendarId: id });
-    hashes[b.item.key] = b.hash;
-    if (old[b.item.key] !== b.hash) batches.push({ item: b.item, events: b.events });
+    const key = normaliseInstance(inst, { me, calendarId: id });
+    const k = key.item.key;
+    hashes[k] = key.hash;
+    const r = revisions[k] || { n: 0 };
+    const moved = old[k] !== key.hash;
+    revisions[k] = { n: r.n + (moved ? 1 : 0), at: now.toISOString() };
+    if (moved) { const b = normaliseInstance(inst, { me, calendarId: id, revision: revisions[k].n }); batches.push({ item: b.item, events: b.events }); }
   }
   return {
     batches,
-    cursor: { reader: 'ics', fetched_at: r.how === 'cached' ? prev.fetched_at || now.toISOString() : now.toISOString(), read_at: now.toISOString(), etag: r.etag || null, last_modified: r.last_modified || null, hashes, ok: true, error: null, count: events.length, name: name || null },
+    cursor: { reader: 'ics', fetched_at: r.how === 'cached' ? prev.fetched_at || now.toISOString() : now.toISOString(), read_at: now.toISOString(), etag: r.etag || null, last_modified: r.last_modified || null, hashes, revisions, ok: true, error: null, count: events.length, name: name || null },
     status: `${r.how} — ${events.length} entries, ${Object.keys(hashes).length} in the window, ${batches.length} changed`,
   };
 }
