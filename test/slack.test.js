@@ -219,7 +219,7 @@ test('the P0 DM for an event: title, when, where, who, and a Join button', async
 // changes is what happens to the repeats, and to the two calls that used to
 // rewrite a message already out.
 import { fakeWebhook } from './fake-webhook.js';
-import { webhookClient } from '../deliver/webhook.js';
+import { webhookClient } from '../deliver/notify.js';
 
 const hookSetup = (over = {}) => {
   const store = new Store();
@@ -255,7 +255,7 @@ test('webhook: TRIAGE_SLACK=off refuses to deliver, and says which it is', async
   assert.match(r.note, /slack is off \(TRIAGE_SLACK=off\)/);
   const d2 = new SlackDelivery(store, { mode: 'webhook' });
   assert.equal(d2.enabled, false);
-  assert.match((await d2.deliver({ item: { id: 1 }, decision: dec(), event: ev() })).note, /no SLACK_WEBHOOK_URL/);
+  assert.match((await d2.deliver({ item: { id: 1 }, decision: dec(), event: ev() })).note, /no TRIAGE_WEBHOOK_URL or SLACK_WEBHOOK_URL/);
 });
 
 test('webhook: the first alarm for an item is never held — it goes at once', async () => {
@@ -496,9 +496,9 @@ test('app mode is byte-identical: the six buttons are exactly what they were', a
 // "arrived" are different claims and `deliveries` can only record the first.
 
 test('webhook: the interrupt names you, so Slack notifies rather than badges', async () => {
-  const { item, client, d } = setup({ mode: 'webhook', webhookUrl: 'https://hooks.slack.com/services/T/B/x', mention: '<@U1>' });
+  const { item, hook, d } = hookSetup({ mention: '<@U1>' });
   await d.deliver({ item, decision: { id: 1, rule: 'reply_to_my_comment', tier: 'P0', reason: 'ann commented after you did' }, event: ev() });
-  const [, msg] = client.calls[0];
+  const msg = hook.posts[0];
   // Both halves matter: `text` is what a push notification shows, and the
   // block is what Slack parses to decide it is a mention at all.
   assert.ok(msg.text.startsWith('<@U1> '), `text carries the mention: ${msg.text}`);
@@ -521,9 +521,9 @@ test('webhook: a meeting names you too, and app mode never does', async () => {
 });
 
 test('webhook: no mention configured means the message is exactly what it was', async () => {
-  const { item, client, d } = setup({ mode: 'webhook', webhookUrl: 'https://hooks.slack.com/services/T/B/x' });
+  const { item, hook, d } = hookSetup();
   await d.deliver({ item, decision: { id: 1, rule: 'reply_to_my_comment', tier: 'P0', reason: 'ann commented after you did' }, event: ev() });
-  const [, msg] = client.calls[0];
+  const msg = hook.posts[0];
   assert.ok(!msg.text.includes('<@'), msg.text);
   assert.equal(d.describe().mention, null);
 });

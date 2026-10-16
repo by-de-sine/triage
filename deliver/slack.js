@@ -4,11 +4,13 @@
 // windows, the age guard, the tiers, and the answer written onto every
 // decision row.
 //
-//   webhook  an incoming webhook URL, one message to the channel it was
-//            created for. No app to create, no token, no socket, no
-//            scopes — and no buttons, no redraw, no Home tab. This is the
-//            path M0's promise now runs through (plan §9 item 2, §11.6);
-//            the client is deliver/webhook.js.
+//   webhook  one URL, one message per interrupt, in one of three shapes
+//            picked by TRIAGE_NOTIFY — `slack` (an incoming webhook, the
+//            path M0's promise runs through: plan §9 item 2, §11.6),
+//            `discord`, or `generic` JSON for anything else (plan §16, G2).
+//            No app to create, no token, no socket, no scopes — and no
+//            buttons, no redraw, no Home tab. The client is
+//            deliver/notify.js and the shapes are deliver/messages.js.
 //   app      the Bolt path below, unchanged and not deleted: the richer
 //            surface is one config line away if an app is ever worth it.
 //
@@ -66,7 +68,8 @@
 // delivered.
 import { p0Message } from './blocks.js';
 import { registerHandlers, actedMessage } from './handlers.js';
-import { webhookClient, webhookHost } from './webhook.js';
+import { webhookClient, webhookHost, MODES as NOTIFY_MODES } from './notify.js';
+import { SHAPES } from './messages.js';
 import { INTERRUPTS, interrupts as mayInterrupt, allows as mayInterruptWhy } from './interrupts.js';
 
 export function parseQuiet(s) {
@@ -98,8 +101,13 @@ const hours = (ms) => Math.round(ms / 3_600_000);
 const where = (channel, ts) => (ts ? `${channel} ${ts}` : channel);
 
 export class SlackDelivery {
-  constructor(store, { mode = null, webhookUrl = null, botToken, appToken, userId, user = null, quiet = '23:00-07:00', tz = Intl.DateTimeFormat().resolvedOptions().timeZone, coalesceMs = 600_000, maxAgeMs = 86_400_000, interrupts = INTERRUPTS, projects = {}, mention = null, rank = null, client = null, now = () => new Date(), log = () => {} } = {}) {
+  constructor(store, { mode = null, notify = null, webhookUrl = null, botToken, appToken, userId, user = null, quiet = '23:00-07:00', tz = Intl.DateTimeFormat().resolvedOptions().timeZone, coalesceMs = 600_000, maxAgeMs = 86_400_000, interrupts = INTERRUPTS, projects = {}, mention = null, rank = null, client = null, now = () => new Date(), log = () => {} } = {}) {
     this.store = store;
+    // Which shape the webhook posts (deliver/messages.js). `slack` unless
+    // told otherwise, which is what every webhook before G2 was; `off` is
+    // the webhook half off, a URL or not — never a shape substituted.
+    if (notify && !NOTIFY_MODES.includes(notify)) throw new Error(`TRIAGE_NOTIFY must be ${NOTIFY_MODES.join(', ')} (got ${notify})`);
+    this.notify = notify || 'slack';
     // lib/config.js always names the mode; constructed directly (the tests,
     // bin/) a webhook URL means `webhook` and anything else means `app`,
     // which is what every caller predating §11.6 meant.
@@ -175,7 +183,7 @@ export class SlackDelivery {
 
   get enabled() {
     if (this.mode === 'off') return false;
-    if (this.webhook) return !!(this.webhookUrl || this.client);
+    if (this.webhook) return this.notify !== 'off' && !!(this.webhookUrl || this.client);
     return !!(this.userId && (this.client || this.botToken));
   }
 
@@ -185,7 +193,8 @@ export class SlackDelivery {
    *  `TRIAGE_SLACK` would send someone looking in the wrong place. */
   get disabledReason() {
     if (this.mode === 'off') return 'not delivered: slack is off (TRIAGE_SLACK=off)';
-    if (this.webhook) return 'not delivered: no SLACK_WEBHOOK_URL (TRIAGE_SLACK=webhook)';
+    if (this.webhook && this.notify === 'off') return 'not delivered: the webhook is off (TRIAGE_NOTIFY=off)';
+    if (this.webhook) return 'not delivered: no TRIAGE_WEBHOOK_URL or SLACK_WEBHOOK_URL (TRIAGE_SLACK=webhook)';
     return 'not delivered: slack not configured';
   }
 
@@ -196,7 +205,7 @@ export class SlackDelivery {
 
   describe() {
     return { enabled: this.enabled, mode: this.mode, socket_mode: !!this.app, user: this.userId, channel: this.enabled ? this.channelName : null,
-      mention: this.webhook ? this.mention : null, projects: Object.keys(this.projects),
+      mention: this.webhook ? this.mention : null, notify: this.webhook ? this.notify : null, projects: Object.keys(this.projects),
       interrupts: this.interruptMap, webhook: this.webhook ? webhookHost(this.webhookUrl || '') : null, quiet: this.quiet ? `${fmt(this.quiet.start)}-${fmt(this.quiet.end)} ${this.tz}` : null, coalesce_ms: this.coalesceMs, max_age_ms: this.maxAgeMs, held: this.store.heldDeliveries().length };
   }
 
@@ -207,14 +216,16 @@ export class SlackDelivery {
     this.act = act;
     if (!this.enabled) {
       if (this.mode === 'off') this.log('slack: off (TRIAGE_SLACK=off) — interrupts are logged, not sent');
-      else if (this.webhook) this.log('slack: TRIAGE_SLACK=webhook but no SLACK_WEBHOOK_URL — interrupts are logged, not sent');
+      else if (this.webhook && this.notify === 'off') this.log('notify: off (TRIAGE_NOTIFY=off) — interrupts are logged, not sent');
+      else if (this.webhook) this.log('slack: TRIAGE_SLACK=webhook but no TRIAGE_WEBHOOK_URL — interrupts are logged, not sent');
       else this.log('slack: not configured (SLACK_BOT_TOKEN and SLACK_USER_ID) — interrupts are logged, not sent');
     } else if (!this.client) {
       if (this.webhook) {
         // One URL and no handshake: there is nothing to connect to and
         // nothing to fail at boot, which is most of the point.
-        this.client = webhookClient(this.webhookUrl);
-        this.log(`slack: webhook -> ${this.client.host} — one message per interrupt to the channel it was created for; no buttons, no redraw, no Home tab (TRIAGE_SLACK=webhook)`);
+        // Discord answers before the message is saved unless asked to wait.
+        this.client = webhookClient(this.webhookUrl, { confirm: this.notify === 'discord' });
+        this.log(`notify: ${this.notify} webhook -> ${this.client.host} — one message per interrupt to the channel it was created for; no buttons, no redraw, no Home tab (TRIAGE_NOTIFY=${this.notify})`);
       } else if (this.appToken) {
         const { App } = await import('@slack/bolt');
         this.app = new App({ token: this.botToken, appToken: this.appToken, socketMode: true, logLevel: 'warn' });
@@ -241,7 +252,10 @@ export class SlackDelivery {
    *  did nothing when pressed. Open and Join are URL buttons, not
    *  interaction, and survive as links (plan §11.6 — acting is the page's
    *  job). `app` is untouched. */
-  message({ item, decision, event, acted = null }) { return p0Message({ item, decision, event, acted, interactive: !this.webhook, mention: this.webhook ? this.mention : null }); }
+  message({ item, decision, event, acted = null }) {
+    if (this.webhook) return (SHAPES[this.notify] || SHAPES.slack)({ item, decision, event, mention: this.mention });
+    return p0Message({ item, decision, event, acted, interactive: true, mention: null });
+  }
 
   async deliver({ item, decision, event, ignoreAge = false }) {
     if (!this.enabled) return { delivered: false, note: this.disabledReason };
@@ -305,7 +319,10 @@ export class SlackDelivery {
       this.store.updateDelivery(last.id, { message_ts: last.message_ts, status: 'sent', decision_id: decision.id }, now.toISOString());
       return { delivered: true, note: `updated ${last.channel} ${last.message_ts} (coalesced)` };
     }
-    const r = await this.client.chat.postMessage({ channel: this.channelName, ...msg, unfurl_links: false });
+    // A webhook takes the payload as it is and answers with no message id;
+    // the app posts to a DM and gets back the channel and `ts` a later
+    // update names.
+    const r = this.webhook ? await this.client.post(msg) : await this.client.chat.postMessage({ channel: this.channelName, ...msg, unfurl_links: false });
     const held = this.store.heldDeliveries().find((d) => d.item_id === item.id) || null;
     // In app mode a held row was keyed on the user id and the DM it became
     // has its own channel id, which is what a later chat.update must name.

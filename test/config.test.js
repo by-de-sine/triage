@@ -40,6 +40,29 @@ test('the webhook URL is carried through as given', () => {
   assert.equal(cfg().slack.webhookUrl, null);
 });
 
+test('the webhook has three shapes: TRIAGE_NOTIFY as typed, else inferred from the host; TRIAGE_WEBHOOK_URL with SLACK_WEBHOOK_URL as its alias', () => {
+  const slack = 'https://hooks.slack.com/services/T/B/x';
+  assert.equal(cfg({ SLACK_WEBHOOK_URL: slack }).slack.notify, 'slack');
+  assert.equal(cfg({ SLACK_WEBHOOK_URL: slack }).slack.webhookUrl, slack, 'the old name still names the URL');
+  assert.equal(cfg({ TRIAGE_WEBHOOK_URL: slack }).slack.mode, 'webhook', 'and the new one turns the webhook on');
+  assert.equal(cfg({ TRIAGE_WEBHOOK_URL: 'https://discord.com/api/webhooks/1/abc' }).slack.notify, 'discord');
+  assert.equal(cfg({ TRIAGE_WEBHOOK_URL: 'https://discordapp.com/api/webhooks/1/abc' }).slack.notify, 'discord');
+  assert.equal(cfg({ TRIAGE_WEBHOOK_URL: 'https://hooks.example.com/triage' }).slack.notify, 'generic');
+  assert.equal(cfg({ TRIAGE_WEBHOOK_URL: 'http://127.0.0.1:9/hook' }).slack.notify, 'generic');
+  assert.equal(cfg().slack.notify, 'off');
+  assert.equal(cfg({ TRIAGE_NOTIFY: 'generic', TRIAGE_WEBHOOK_URL: slack }).slack.notify, 'generic', 'typed wins over the host');
+  assert.equal(cfg({ TRIAGE_NOTIFY: 'off', TRIAGE_WEBHOOK_URL: slack }).slack.mode, 'off', 'TRIAGE_NOTIFY=off is the webhook off, URL or not');
+  assert.equal(cfg({ TRIAGE_NOTIFY: 'off', TRIAGE_WEBHOOK_URL: slack, SLACK_BOT_TOKEN: 'xoxb' }).slack.mode, 'app');
+  assert.throws(() => cfg({ TRIAGE_SLACK: 'webhook', TRIAGE_NOTIFY: 'off', TRIAGE_WEBHOOK_URL: slack }), /TRIAGE_SLACK=webhook with TRIAGE_NOTIFY=off/, 'the two typed against each other is refused, not resolved');
+  assert.throws(() => cfg({ TRIAGE_NOTIFY: 'teams' }), /TRIAGE_NOTIFY must be off, slack, discord, generic \(got teams\)/);
+  // The mention is checked in the grammar of the shape it goes to.
+  assert.equal(cfg({ TRIAGE_WEBHOOK_URL: 'https://discord.com/api/webhooks/1/abc', TRIAGE_MENTION: '12345' }).slack.mention, '<@12345>');
+  assert.equal(cfg({ TRIAGE_WEBHOOK_URL: 'https://discord.com/api/webhooks/1/abc', TRIAGE_MENTION: 'here' }).slack.mention, '@here');
+  assert.throws(() => cfg({ TRIAGE_WEBHOOK_URL: 'https://discord.com/api/webhooks/1/abc', TRIAGE_MENTION: 'U9' }), /Discord/);
+  assert.equal(cfg({ TRIAGE_WEBHOOK_URL: 'https://hooks.example.com/t', TRIAGE_MENTION: 'on-call' }).slack.mention, 'on-call', 'generic passes any text through');
+  assert.throws(() => cfg({ TRIAGE_MENTION: 'alice' }), /Slack/, 'with no URL the grammar is Slack\'s, as it always was');
+});
+
 test('TRIAGE_CALENDAR keeps its shape — the one TRIAGE_SLACK copies', () => {
   assert.equal(cfg().calendar.mode, null);
   assert.equal(cfg({ TRIAGE_CALENDAR: 'fake' }).calendar.mode, 'fake');

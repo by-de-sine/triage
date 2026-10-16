@@ -122,7 +122,7 @@ log(`rank: claim ${cfg.rank.weights.claim} · time ${cfg.rank.weights.time} (${O
 log(`slack: interrupts on ${Object.entries(deliver.interruptMap).map(([k, v]) => `${k}: ${v.join(', ') || 'nothing'}`).join(' · ') || 'nothing (TRIAGE_INTERRUPT=off)'}${cfg.prefsFile ? ` · ${cfg.slack.interrupts.statements.length} statements over ${Object.keys(cfg.prefs.projects).length} projects (${cfg.prefsFile})` : ''}`);
 // Plan §14.1: a webhook's channel message notifies nobody unless it names
 // somebody, and the first real P0 this system sent proved it the hard way.
-if (cfg.slack.mode === 'webhook') log(`slack: interrupts ${cfg.slack.mention ? `mention ${cfg.slack.mention} — so Slack notifies, not just delivers` : 'mention nobody (TRIAGE_MENTION unset or off): a channel message is an unread badge, not a push'}`);
+if (cfg.slack.mode === 'webhook') log(`notify: interrupts ${cfg.slack.mention ? `mention ${cfg.slack.mention} — so the channel notifies, not just delivers` : 'mention nobody (TRIAGE_MENTION unset or off): a channel message is an unread badge, not a push'}`);
 
 // What Done does outside triage, per source: a map keyed by source name,
 // never a branch in act(). A source that declares `mark` supplies its own
