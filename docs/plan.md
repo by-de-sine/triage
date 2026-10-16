@@ -1593,8 +1593,12 @@ what was built:
 > P0s reach you within a minute. The Slack app — buttons, a DM, a Home tab
 > — is `slack/manifest.yml` and `TRIAGE_SLACK=app`.
 
-Two facts behind the first line were checked on 2026-10-15 rather than
-assumed: with `node_modules` absent, every module in the tree imports and
+The clone line presumes a repository the reader can reach. Today that is
+a collaborator, because the repository is private (§6): the stranger half
+of the promise is only true the day §16.7 item d is taken, and public
+access is a prerequisite of *that promise*, not of G3 — the demo and the
+sentence are built for the day, and the day is the owner's. Two facts
+behind the first line were checked on 2026-10-15 rather than assumed: with `node_modules` absent, every module in the tree imports and
 all 243 tests pass, because `@slack/bolt` and `@slack/web-api` are reached
 only through the dynamic imports in `deliver/slack.js` under
 `TRIAGE_SLACK=app`. So the demo needs no install today, and no
@@ -1660,10 +1664,12 @@ for GitHub alone.
 (2026-10-15, with its day-old bound and `now` in the match context — the
 reference has fifteen thread rules and main has sixteen); **the `user`
 column**, which the reference dropped and main keeps on every query — it
-stays, and after G1 it is the GitHub login when GitHub is on and the
-GitLab username otherwise, while `me` is per source (switching which forge
-is first on an existing store changes `user` and orphans the rows, which
-is a documented trap, not a feature); **per-owner tokens** from
+stays, and after G1 it is **whoever the store already files items under**,
+so adding a forge later never re-keys a queue; on an empty store it is
+the GitHub login when GitHub is on, else the GitLab username, and from
+then on it is stable. `me` is per source. A boot whose identities include
+nobody the store belongs to says so in the log rather than filing a second
+person's items beside the first's; **per-owner tokens** from
 `TRIAGE_TOKENS_DIR` (`tokenFor` on `GitHubApi`, which the reference never
 had), extended while it is open to read an owner's `gh` config directory
 as the queue row of 2026-10-10 asks; **`TRIAGE_ISSUES`** keeps its meaning
@@ -1718,7 +1724,8 @@ for the webhook half. `TRIAGE_SLACK` keeps `app | off` for the app half,
 and its old `webhook` value, with `SLACK_WEBHOOK_URL`, is read as
 `TRIAGE_NOTIFY=slack` with `TRIAGE_WEBHOOK_URL` (§16.7 item e). The two
 halves do not infer from each other: under `TRIAGE_NOTIFY=discord` the
-app is off unless `TRIAGE_SLACK=app` says so, and the two may both be on. `TRIAGE_MENTION` keeps its meaning per mode: a Slack id or
+app is off unless `TRIAGE_SLACK=app` says so, and `TRIAGE_SLACK=app` means
+the app and not the webhook — one process posts to one place. `TRIAGE_MENTION` keeps its meaning per mode: a Slack id or
 `!here`, a Discord id or role or `@here`, any text for generic, and a bare
 name is still refused where it would notify nobody (§14.1).
 
