@@ -185,11 +185,32 @@ One process, one SQLite file, four seams:
   there. GitHub honours `Last-Modified` (a 304 is free) and
   `X-Poll-Interval` (the API says how often), and for each thread that moved
   fetches the subject and, for issues and PRs, the comments, review comments
-  and reviews since the cursor last saw it. Calendar reads `events.list`
-  with a `syncToken` — the first call a full sync, every one after it only
-  what moved — and keeps the events starting in the next 48 h. Events are
-  keyed (`github:comment:<id>`, `calendar:<eventId>:<updated>`) so a restart
-  re-emits nothing.
+  and reviews since the cursor last saw it. Events are keyed
+  (`github:comment:<id>`) so a restart re-emits nothing.
+
+  **The calendar is read from an ICS feed** (plan §16, G4), the address
+  every calendar publishes — Google's "secret address in iCal format",
+  Outlook's "publish calendar", a Fastmail or Apple subscription URL — so
+  there is no OAuth client, no cloud project and no consent step: the URL
+  is the credential, and only its host is ever logged. The feed is fetched
+  at most every `TRIAGE_CALENDAR_EVERY_MIN` and then conditionally (a 304
+  re-reads what it had), parsed by `lib/ics.js` — enough of RFC 5545:
+  unfolding, zones through `Intl` (and the Windows names Outlook writes),
+  all-day entries, `EXDATE`, `RECURRENCE-ID`, and `RRULE` daily, weekly,
+  monthly and yearly with `INTERVAL`, `COUNT` and `UNTIL`; stdlib only —
+  and expanded from a day back to 48 h ahead. An item is one event, or one
+  occurrence of a recurring one (`<UID>@<occurrence>`); its event is keyed
+  on a hash of what a rule reads (`calendar:<key>:<hash>`), so a
+  reschedule, a cancellation or an answer re-tiers it and an unchanged
+  feed emits nothing. **It is state, too**: an event gone from the feed
+  leaves the set `reconcile` hands the runner and is resolved by the
+  source. The calendar's **project** is the feed's own name
+  (`X-WR-CALNAME`) unless `TRIAGE_CALENDAR_ID` names one. *The other
+  path*, kept until the feed has run a week in production (plan §16.7
+  item b): Google's `events.list` with a `syncToken` — the first call a
+  full sync, every one after it only what moved — events keyed
+  `calendar:<eventId>:<updated>`. It never resolves anything: an
+  incremental sync has no whole set to hand over.
 
   **The GitHub source has a second mode, open issues as state** (#19):
   for the repositories in `TRIAGE_ISSUES`, every open issue is read whole
@@ -330,7 +351,7 @@ holds and `decisions` stays a record of what the rules observed.
 
 | Action | What it does |
 |---|---|
-| **Done** | `state = done`, plus whatever the item's *source* does about that — a `marks` entry keyed by source name, not a branch in `act()`, supplied by the source's own `mark` where it has one. GitHub's marks the thread read (`PATCH /notifications/threads/:id`, the id the notification carried); **GitLab's marks the todo done** (`POST /todos/:id/mark_as_done`, the todo that brought the item — a thread that arrived without one says `no todo on the item`); if the forge refuses — no thread id, a token without the scope, an outage — the local state still changes and the reason is logged and kept on the action row. **The calendar's marks nothing: triage holds a read-only scope and never writes to Google**, so Done is local and the answer says `nothing marked on Google — triage only reads your calendar`. Declining an invitation still happens in Google, and the next poll notices. **Home Assistant's marks writes**: `todo.update_item` with `status: completed` on that item's own list, so ticking a chore off here ticks it off on the kitchen screen; if Home Assistant refuses or cannot be reached, the local state still changes and the reason is on the action row. It is the only write this process makes outside its own store. Reopens on a new P0–P2: you handled it; now there is more. |
+| **Done** | `state = done`, plus whatever the item's *source* does about that — a `marks` entry keyed by source name, not a branch in `act()`, supplied by the source's own `mark` where it has one. GitHub's marks the thread read (`PATCH /notifications/threads/:id`, the id the notification carried); **GitLab's marks the todo done** (`POST /todos/:id/mark_as_done`, the todo that brought the item — a thread that arrived without one says `no todo on the item`); if the forge refuses — no thread id, a token without the scope, an outage — the local state still changes and the reason is logged and kept on the action row. **The calendar's marks nothing: triage only reads it** — a feed cannot be written, and on the Google path the scope is read-only — so Done is local and the answer says `nothing marked on your calendar — triage only reads the feed` (on the Google path, `nothing marked on Google — triage only reads your calendar`). Declining an invitation still happens in the calendar, and the next read notices. **Home Assistant's marks writes**: `todo.update_item` with `status: completed` on that item's own list, so ticking a chore off here ticks it off on the kitchen screen; if Home Assistant refuses or cannot be reached, the local state still changes and the reason is on the action row. It is the only write this process makes outside its own store. Reopens on a new P0–P2: you handled it; now there is more. |
 | **Snooze** | `state = snoozed until`; the first poll past the time wakes it, sets it open again and writes a `snooze_wake` decision — a P0 is sent at once (its age is no bar, you asked for it); anything else is back in the list at a fresh rank, and the row says so. Buttons offer 1 h and 1 d; the API takes any ISO time or `30m` / `1h` / `1d`. New activity while snoozed does not wake it. |
 | **Later** | `state = later`; the score is divided by ten thousand, so the item sinks beneath every open item of every tier and has no date. Re-tiered on new activity but stays sunk; only a new P0 lifts it. |
 | **Mute thread** | `state = muted`; still tiered and logged on every poll, never delivered, never reopened. |
@@ -527,7 +548,7 @@ both: P0 is a thing to do now.
 | Tier | Meaning | Rules (calendar, in order) |
 |---|---|---|
 | **P0** | it is about to start | `starts_in_15_min` — fifteen minutes before an event you are going to, from the clock rather than a poll. Never for one you declined, one that was cancelled, or an all-day entry |
-| **P1** | someone is waiting for an answer | `new_invitation` — you are an attendee, your answer is still `needsAction`, and it is not your own event |
+| **P1** | someone is waiting for an answer | `new_invitation` — you are an attendee, your answer is still `needsAction` (`PARTSTAT=NEEDS-ACTION` in a feed, which needs `TRIAGE_CALENDAR_ME` to know which attendee is you), and it is not your own event |
 | **P2** | worth knowing today | `day_ahead` — anything else on your calendar in the window. This is the day-ahead brief, and it is in the list under `calendar` |
 | **P3** | on the calendar, nothing to do | `declined` · `cancelled` · `all_day` · `own_event` (yours, nobody else on it) · `ambient` |
 
@@ -653,7 +674,7 @@ the payload. A source's own `off` still leaves its fake out.
 
 ```bash
 node server.js                 # 127.0.0.1:3300 — the page is at /
-node bin/google-consent.js     # once, by hand: the Google consent that mints the refresh token
+node bin/google-consent.js     # once, by hand, on the Google path only: the consent that mints the refresh token
 node bin/replay.js o/r#123     # what the rules would have said, step by step (group/project!12 on GitLab)
 curl -X POST localhost:3300/api/items/12/act -H 'content-type: application/json' -d '{"action":"snooze","until":"1h"}'
 ```
@@ -688,10 +709,14 @@ read from the repo.
 | `TRIAGE_GITHUB_ISSUES` | — | repositories whose **open issues** are read as state and reconciled, `owner/name` comma-separated (a GitHub URL is accepted; a bad entry is refused at boot). Unset, the source is the inbox alone. A list and not an inference: "repos I work in" is not a question GitHub answers (plan §12.7). **`TRIAGE_ISSUES` is read as an alias** — the name it had before there were two forges — so a `.env` written then goes on meaning it |
 | `TRIAGE_ISSUES_EVERY_MIN` | `5` | how often each open set is read whole — one list call per repository per hundred issues. `0` reads it on every poll. Between reads the last set stands, and nothing is resolved against a set the read could not complete |
 | `TRIAGE_LEDGER` | unset | a path names the markdown queue file, whose `status/` sibling is the handoffs directory, and refuses to start if it is missing; unset or `off` never registers the source. The read is local and read-only — a worktree can point at the real file; its own store is the only thing reconcile touches |
-| `TRIAGE_CALENDAR` | unset | unset means **on if the credentials are there**, off otherwise — a Google project is ring-0 work and a box without one should run the rest of triage rather than fail a poll a minute. `google` refuses to start without them; `off` never registers the source; `fake` runs the canned calendar from `test/`, for a worktree with no project — every title says `(fake)` |
-| `GOOGLE_CLIENT_FILE` | `google-oauth.json` beside the `.env` | the OAuth **desktop client** downloaded from the Google Cloud console (`{"installed": {…}}`). `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` in the environment override it |
-| `GOOGLE_TOKEN_FILE` | `google-token.json` beside the `.env` | the refresh token, written once by `node bin/google-consent.js` — the one browser step, from the laptop. `GOOGLE_REFRESH_TOKEN` overrides it. Scope is `calendar.readonly`: triage never writes to your calendar |
-| `TRIAGE_CALENDAR_ID` | `primary` | which calendar. One, for now |
+| `TRIAGE_CALENDAR` | unset | `off` · `ics` · `google` · `fake`. Unset means **the feed when `TRIAGE_CALENDAR_URL` or `TRIAGE_CALENDAR_FILE` names one, Google when its credentials resolve, off otherwise** — a box without either should run the rest of triage rather than fail a poll a minute. `ics` and `google` refuse to start without what they need; `off` never registers the source; `fake` runs the canned feed from `test/fake-calendar.js` — a meeting twelve minutes out, an unanswered invitation, a recurring standup with one occurrence moved — with no feed at all, every title saying `(fake)`. A mode it does not recognise is refused at boot |
+| `TRIAGE_CALENDAR_URL` | — | the feed: Google's *Settings › your calendar › Integrate calendar › Secret address in iCal format*, Outlook's *publish calendar* ICS link, or any subscription URL (`webcal://` is read as `https://`). **The URL is the credential** — anyone holding it reads your calendar — so it is never logged, stored or returned by the API (its host is), and must be `https` off loopback. A redirect is followed by hand, at most five, and only to `https` (iCloud's addresses redirect to the partition holding the calendar); a body past 20 MB is abandoned as it streams. Read-only by construction: a feed cannot be written to |
+| `TRIAGE_CALENDAR_FILE` | — | the feed as a file on disk instead, re-read on every poll. Not with `TRIAGE_CALENDAR_URL`: naming both is refused |
+| `TRIAGE_CALENDAR_ME` | — | **your** address on invitations, comma-separated if you have more than one. A feed lists attendees by address and says nothing about which is you, so without it no invitation can be yours to answer (`new_invitation` never fires) and only an entry with nobody on it reads as your own; the boot log says so. An entry that is not an address is refused at boot |
+| `TRIAGE_CALENDAR_EVERY_MIN` | `5` | how often the feed URL is fetched; between fetches the last text is re-expanded every minute, so the window and the alarm still move. Published feeds lag the calendar by minutes to hours anyway. `0` fetches on every poll |
+| `GOOGLE_CLIENT_FILE` | `google-oauth.json` beside the `.env` | *The other path* (`TRIAGE_CALENDAR=google`). The OAuth **desktop client** downloaded from the Google Cloud console (`{"installed": {…}}`). `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` in the environment override it |
+| `GOOGLE_TOKEN_FILE` | `google-token.json` beside the `.env` | *The other path.* The refresh token, written once by `node bin/google-consent.js` — the one browser step, from the laptop. `GOOGLE_REFRESH_TOKEN` overrides it. Scope is `calendar.readonly`: triage never writes to your calendar |
+| `TRIAGE_CALENDAR_ID` | the feed's name · `primary` | which calendar, and so the project its items belong to (`projects."<id>"` in the preferences file). Unset, a feed's own name (`X-WR-CALNAME`, else the file's name or the URL's host); on the Google path, `primary`. One calendar, for now |
 | `TRIAGE_CALENDAR_WINDOW_H` | `48` | an event starting further out than this is not an item yet. Its start is remembered, and it becomes one when it enters the window |
 | `TRIAGE_CALENDAR_SOON_MIN` | `15` | how long before an event starts the P0 fires |
 | `TRIAGE_HA` | unset | the household to-do lists (plan §12.8). Unset means **on if `HA_URL` and `HA_TOKEN` are both set**, off otherwise; `on` refuses to start without them; `off` never registers the source; `fake` runs the canned pair of lists from `test/` — `todo.alice_inbox` and `todo.household`, read unless `HA_LISTS` names some of them — so a worktree, or a box with no route to Home Assistant, proves the whole flow, Done included. A mode it does not recognise is refused at boot, as `TRIAGE_CALENDAR` is. **It is unset in production**: whether the box triage runs on may reach Home Assistant is a decision about the network, and it is in the queue |
@@ -776,7 +801,7 @@ Bound to 127.0.0.1; JSON.
 | `GET /api/rank` | the weights, the time shapes registered, the stated preferences, the interrupt set, and how many items have never been ranked |
 | `GET /api/interrupts` | the resolved interrupt statements grouped by layer, the effective set, and which sources declare a project. `?source=&rule=` with `&project=` or `&item=` answers one question — would this interrupt, and which statement says so (plan §14.6) |
 | `POST /api/rank/backfill` | `?all=1&limit=` — the bounded bootstrap pass. Idempotent: it walks only what has never been ranked unless `all=1` |
-| `GET /api/sources` | registered sources, their cursors and health. A cursor is shown the way its own source describes it — GitHub's conditional stamp and thread count and, with `TRIAGE_ISSUES`, `issues: { repos, open, complete, read_at }` for the open set; the calendar's `synced_at` and how many events are waiting to enter the window. Never the sync token itself |
+| `GET /api/sources` | registered sources, their cursors and health. A cursor is shown the way its own source describes it — GitHub's conditional stamp and thread count and, with `TRIAGE_ISSUES`, `issues: { repos, open, complete, read_at }` for the open set; the calendar's — from a feed — when it was last fetched and read, whether that read was complete, how many entries the feed holds and how many are in the window, and the feed's name; from Google, `synced_at` and how many events are waiting to enter the window. Never the feed's URL, and never the sync token |
 | `POST /api/sources/:name/run` | poll now; answers with what was stored and decided |
 | `GET /api/decisions` | `?tier=&rule=&by=&item=&since=&delivered=&limit=` — every verdict with its rule and what delivery said: `sent`, `updated … (coalesced)`, `held`, or why not — `not delivered: <rule> does not interrupt (<the statement that said so — the default set, a `TRIAGE_PREFS` project, `TRIAGE_INTERRUPT`>); it is in the list` for everything the interrupt set does not name. Each row carries `by` (`rule`, or `wake` for the row a snooze that ended wrote) |
 | `GET /healthz` | `ok`, when it started, `commit` (what the deploy said is running, or null — §Deploy), `user` and `identity` (who you are, per source), the item and decision counts, which sources are failing, when each last read successfully (`read`), and what Slack would do |

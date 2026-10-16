@@ -1,3 +1,7 @@
+// The calendar, both ways it is read: an ICS feed built from a list of
+// events (below, `ics()` and `demoIcs()` — the default path, plan §16 G4),
+// and the Google path's API. The Google half leaves with the Google path.
+//
 // A GoogleApi stand-in, the shape test/fake-github.js sets: routes to
 // fixtures, counts calls, refreshes a token like the real one and can be
 // told to answer 410 (the sync token aged out), 401 (the access token did)
@@ -102,4 +106,67 @@ export function demoCalendar({ now = () => new Date() } = {}) {
     event({ id: 'demo-far', summary: '(fake) Quarterly review', start: at_(7 * 24 * 60), updated: stamp, organizer: 'ann@example.com', attendees: [me(), attendee('ann@example.com')] }),
   ];
   return fakeCalendar(evs, { clock: stamp });
+}
+
+// --- the feed (plan §16, G4) ---------------------------------------------------
+// The same calendar as an ICS text, built from a list of events, so the feed
+// reader is tested and demonstrated with no feed on the network.
+const icsStamp = (ms) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+const icsDay = (ms) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, '');
+
+/** One VEVENT. `start`/`end` are ISO strings or ms; `allDay` writes dates
+ *  (`start` then names the UTC day); `tzid` writes a zoned local time. */
+export function vevent({ uid, summary = 'A meeting', start, end = null, allDay = false, status = 'CONFIRMED', organizer = null, attendees = [], location = null, description = null, url = null, rrule = null, exdates = [], recurrenceId = null, updated = null, join = null, tzid = null, local = null }) {
+  const s = typeof start === 'number' ? start : Date.parse(start);
+  const e = end == null ? s + (allDay ? 86_400_000 : 1_800_000) : typeof end === 'number' ? end : Date.parse(end);
+  const lines = ['BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${icsStamp(updated ? Date.parse(updated) : s)}`, `SUMMARY:${summary}`, `STATUS:${status}`];
+  if (updated) lines.push(`LAST-MODIFIED:${icsStamp(Date.parse(updated))}`);
+  if (local) lines.push(`DTSTART;TZID=${tzid}:${local}`);
+  else lines.push(allDay ? `DTSTART;VALUE=DATE:${icsDay(s)}` : `DTSTART:${icsStamp(s)}`, allDay ? `DTEND;VALUE=DATE:${icsDay(e)}` : `DTEND:${icsStamp(e)}`);
+  if (recurrenceId) lines.push(`RECURRENCE-ID:${icsStamp(Date.parse(recurrenceId))}`);
+  if (rrule) lines.push(`RRULE:${rrule}`);
+  for (const x of exdates) lines.push(`EXDATE:${icsStamp(Date.parse(x))}`);
+  if (organizer) lines.push(`ORGANIZER;CN=${organizer.name || organizer.email}:mailto:${organizer.email}`);
+  for (const a of attendees) lines.push(`ATTENDEE;CN=${a.name || a.email};PARTSTAT=${(a.response || 'ACCEPTED').toUpperCase()}:mailto:${a.email}`);
+  if (location) lines.push(`LOCATION:${location}`);
+  if (description) lines.push(`DESCRIPTION:${description.replace(/\n/g, '\\n')}`);
+  if (url) lines.push(`URL:${url}`);
+  if (join) lines.push(`X-GOOGLE-CONFERENCE:${join}`);
+  lines.push('END:VEVENT');
+  return lines.join('\r\n');
+}
+
+/** A whole feed. A string in the list is written as it is. */
+export function ics(events, { name = 'Alice' } = {}) {
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//triage//fake//EN', ...(name ? [`X-WR-CALNAME:${name}`] : []), ...events.map((e) => (typeof e === 'string' ? e : vevent(e))), 'END:VCALENDAR', ''].join('\r\n');
+}
+
+/** People on an invitation, in the feed's terms. */
+export const alice = (response = 'accepted') => ({ email: 'alice@example.com', name: 'Alice', response });
+export const ann = { email: 'ann@example.com', name: 'Ann Lee' };
+export const bob = { email: 'bob@example.com', name: 'Bob Ray' };
+
+/** The working day of `demoCalendar`, as a feed — what `TRIAGE_CALENDAR=fake`
+ *  and the demo read, since the feed is the default path. One of each thing
+ *  the rules separate, and a daily standup that recurs, with an occurrence
+ *  moved. Obviously fake: every title says so. Written once, relative to
+ *  `now`, so an unchanged poll emits nothing. You are alice@example.com. */
+export function demoIcs({ now = () => new Date() } = {}) {
+  const t = now().getTime();
+  const at = (min) => t + min * 60_000;
+  const stamp = new Date(t - 3_600_000).toISOString();
+  // The standup is at a fixed time of day, an hour and a half from now
+  // yesterday — so today's is ninety minutes away and tomorrow's is moved.
+  const first = at(-24 * 60 + 90);
+  return ics([
+    { uid: 'demo-soon', summary: '(fake) Design review', start: at(12), updated: stamp, organizer: ann, location: 'Room 2', join: 'https://meet.google.com/fake-demo-abc', attendees: [alice(), ann, bob] },
+    { uid: 'demo-invite', summary: '(fake) Roadmap sync', start: at(26 * 60), updated: stamp, organizer: bob, attendees: [alice('needs-action'), bob] },
+    { uid: 'demo-today', summary: '(fake) One-to-one', start: at(5 * 60), updated: stamp, organizer: ann, attendees: [alice(), ann] },
+    { uid: 'demo-allday', summary: '(fake) Ann out of office', start: at(24 * 60), allDay: true, updated: stamp },
+    { uid: 'demo-solo', summary: '(fake) Focus block', start: at(3 * 60), updated: stamp },
+    { uid: 'demo-declined', summary: '(fake) All-hands', start: at(7 * 60), updated: stamp, organizer: bob, attendees: [alice('declined'), bob] },
+    { uid: 'demo-standup', summary: '(fake) Standup', start: first, updated: stamp, organizer: ann, attendees: [alice(), ann, bob], rrule: 'FREQ=DAILY;COUNT=30' },
+    { uid: 'demo-standup', summary: '(fake) Standup (moved)', start: first + 2 * 86_400_000 + 3_600_000, recurrenceId: new Date(first + 2 * 86_400_000).toISOString(), updated: stamp, organizer: ann, attendees: [alice(), ann, bob] },
+    { uid: 'demo-far', summary: '(fake) Quarterly review', start: at(7 * 24 * 60), updated: stamp, organizer: ann, attendees: [alice(), ann] },
+  ], { name: 'Alice (fake)' });
 }

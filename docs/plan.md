@@ -1817,6 +1817,26 @@ without them, since the calendar is off in production today and stays off.
 *Cost:* the largest by code (the parser is a third of the port) and the
 smallest by risk to production, which has never run this source.
 
+*Built 2026-10-15, with what the port fixed in the reference and the
+choices it took.* One source with two readers, picked by whether the
+context carries `feed` or `api`: the Google half is main's, untouched, and
+the shared half (`due`, `time`, `project`, the item's shape, the rules) is
+the same for both, so `rules/calendar.js` did not change. Five reference
+bugs did not cross: an open-ended `RRULE` stopped at 2,000 candidates from
+`DTSTART`, so a daily standup created more than about five years ago
+never reached today (a rule without `COUNT` now starts its walk near the
+window); a yearly 29 February rolled into 1 March; an all-day date was
+read at UTC midnight rather than yours; a `TZID` that `Intl` does not
+know — every Windows name Outlook writes — read as UTC (a small Windows
+map, then your zone); and an override moved into the window from an
+occurrence outside it was lost. Two additions: the feed's URL is fetched
+at most every `TRIAGE_CALENDAR_EVERY_MIN` (5) and the cached text
+re-expanded every minute, so the window and the alarm still move without
+a request a minute against a published feed; and a poll emits only the
+instances whose hash moved, so the store does no work for an unchanged
+feed. `TRIAGE_CALENDAR=fake` reads `demoIcs()`; `demoCalendar()` stays
+for the Google half's tests and leaves with it.
+
 ### 16.4 What stays, and why
 
 - **The CRM source stays, specific as it is.** It reads one product's

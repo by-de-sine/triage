@@ -8,15 +8,15 @@ is not repeated here; read it first. This file is how to *work on* it.
 
 ```text
 server.js        boot: config, store, the forge clients (GitHub, GitLab — each registers when its token resolves, and says who you are there), the Google client, Slack, the runner, the API; under TRIAGE_DEMO=1 (lib/config.js `demoConfig`) every source on its fake from test/ and delivery off
-sources/         one file per source: github.js, gitlab.js, calendar.js, ledger.js, ha.js, crm.js — poll(ctx) → batches + cursor; due(ctx) for the clock's half; reconcile(ctx) for the state half (github.js, gitlab.js and crm.js have both: a forge's inbox is a feed and the open issues of TRIAGE_GITHUB_ISSUES / TRIAGE_GITLAB_ISSUES are state; the CRM's open tasks are state and anybody else's edit is an event; ledger.js and ha.js are state throughout); whoami(ctx) and mark(item, ctx) on the forges
+sources/         one file per source: github.js, gitlab.js, calendar.js, ledger.js, ha.js, crm.js — poll(ctx) → batches + cursor; due(ctx) for the clock's half; reconcile(ctx) for the state half (github.js, gitlab.js and crm.js have both: a forge's inbox is a feed and the open issues of TRIAGE_GITHUB_ISSUES / TRIAGE_GITLAB_ISSUES are state; the CRM's open tasks are state and anybody else's edit is an event; ledger.js and ha.js are state throughout; calendar.js has two readers — an ICS feed, which is state, and Google's events.list, which is a feed — picked by whether the context carries `feed` or `api`); whoami(ctx) and mark(item, ctx) on the forges
 rules/           thread.js (both forges: a reply on GitLab is the same observation as one on GitHub), calendar.js, ledger.js, ha.js, crm.js — ordered, named, every match returned; each rule declares its `claim`
 deliver/         slack.js (the windows, the guards, the answer on every decision — the same for both halves), notify.js (the webhook half, TRIAGE_SLACK=webhook: one URL, one post, the mention grammar per endpoint), messages.js (pure; the three shapes TRIAGE_NOTIFY picks — slack, discord, generic — each drawn by item.kind), blocks.js (pure; the app's message and views, and the slack shape's source), handlers.js (TRIAGE_SLACK=app only: buttons, /triage, Home), interrupts.js (M5 + §14: which rules, per source, for which project, may fire Slack — four layers resolved into one statement list)
-lib/             store.js (node:sqlite), runner.js, pipeline.js, rules.js, actions.js, lists.js, api.js, config.js, forge-api.js (one RestApi; GitHubApi with a token per owner, GitLabApi), forge.js (what the forge sources share: the news set, the time curve, the repository-list parser), google-api.js, ha-api.js, twenty-api.js (GraphQL, read-only), util.js, rank.js (M5: the score, which is the product), backfill.js (M5: the one bounded pass that gives the backlog a rank), aggregates.js (§13.6: the queue as counts, for a program), reports.js (§15: the queue over time — named reports over one bounded read, for the stats page and for a program)
+lib/             store.js (node:sqlite), runner.js, pipeline.js, rules.js, actions.js, lists.js, api.js, config.js, forge-api.js (one RestApi; GitHubApi with a token per owner, GitLabApi), forge.js (what the forge sources share: the news set, the time curve, the repository-list parser), ics.js (enough of RFC 5545 for a feed: the parser and the recurrence expansion, pure), google-api.js (the calendar's other path), ha-api.js, twenty-api.js (GraphQL, read-only), util.js, rank.js (M5: the score, which is the product), backfill.js (M5: the one bounded pass that gives the backlog a rank), aggregates.js (§13.6: the queue as counts, for a program), reports.js (§15: the queue over time — named reports over one bounded read, for the stats page and for a program)
 public/          the list page (index.html, app.js) and the stats page (stats.html, stats.js): static, no build, one stylesheet
 bin/replay.js    run the rules over one real thread, on either forge, step by step, writing nothing
 bin/google-consent.js  the one browser step, run once by hand: mints the calendar's refresh token
 slack/           the app manifest
-test/            node --test; in-memory store, fake GitHub (fake-github.js), fake GitLab (fake-gitlab.js), fake Slack, fake calendar (fake-calendar.js), fake Home Assistant (fake-ha.js), fake Twenty (fake-twenty.js), a temp-dir ledger (ledger.test.js; fake-ledger.js is the demo's). Each fake's demo*() is what its `fake` mode and `npm run demo` run
+test/            node --test; in-memory store, fake GitHub (fake-github.js), fake GitLab (fake-gitlab.js), fake Slack, fake calendar (fake-calendar.js: a feed, and the Google path's API), fake Home Assistant (fake-ha.js), fake Twenty (fake-twenty.js), a temp-dir ledger (ledger.test.js; fake-ledger.js is the demo's). Each fake's demo*() is what its `fake` mode and `npm run demo` run
 docs/plan.md     the plan: what is still intended, with dated notes for what shipped or was superseded
 .env.example     every variable, commented; preferences.example.json is the preferences file's shape
 ```
@@ -209,20 +209,24 @@ to the box it runs on, not to this repo; the project ships no container and
 no compose file, on purpose — the service is one Node process with
 `node:sqlite` and two npm dependencies, and that is the whole stack.
 
-**A worktree runs with the calendar off unless you say otherwise**: the
-Google credentials live beside the production `.env`, and a worktree's
-`.env` replaces that file, so `TRIAGE_CALENDAR` is unset and the source
-does not register. Two options. `TRIAGE_CALENDAR=fake` runs the canned
-calendar from `test/fake-calendar.js` behind the real source — a meeting
-twelve minutes out, an unanswered invitation, an all-day entry, a focus
-block, one you declined and one a week away — so the poll, the clock's
-alarm, every rule, the P0 DM's shape and the page's rows are all exercised
-with no Google project; every title says `(fake)`. Or point it at the real
-credentials by name (`GOOGLE_CLIENT_FILE`, `GOOGLE_TOKEN_FILE`, or the
-three `GOOGLE_*` values) — that is read-only on your real calendar and
-costs nothing, but it is your real calendar in a branch's database, so say
-so in the PR. Nothing a worktree does can write to Google: the scope is
-`calendar.readonly` and Done on a calendar item is local by construction.
+**A worktree runs with the calendar off unless you say otherwise**: a
+worktree's `.env` names no feed and replaces the file the Google
+credentials sit beside, so `TRIAGE_CALENDAR` resolves to off and the
+source does not register. Three options. `TRIAGE_CALENDAR=fake` runs the
+canned feed from `test/fake-calendar.js` behind the real feed reader — a
+meeting twelve minutes out, an unanswered invitation, an all-day entry, a
+focus block, one you declined, a daily standup with one occurrence moved,
+and one a week away — so the parse, the expansion, the poll, the clock's
+alarm, every rule, reconcile and the page's rows are all exercised with no
+feed at all; every title says `(fake)`. `TRIAGE_CALENDAR_FILE` names a
+`.ics` on disk you can edit between polls, which is the quickest way to
+see a reschedule re-tier or a deletion resolve. Or point it at a real feed
+(`TRIAGE_CALENDAR_URL`, and `TRIAGE_CALENDAR_ME`) or, on the other path,
+the real Google credentials by name — read-only either way and costing
+nothing, but it is your real calendar in a branch's database, so say so in
+the PR. Nothing a worktree does can write to a calendar: a feed cannot be
+written, the Google scope is `calendar.readonly`, and Done on a calendar
+item is local by construction.
 
 **A worktree runs with Home Assistant off** for the same reason.
 `TRIAGE_HA=fake` is the answer, and it is a better one than the calendar's:
@@ -293,7 +297,7 @@ to your real inbox. Press Done on a worktree only when you mean it.
 
 `node --test` — `npm test` in the worktree. The suite
 runs against an in-memory store with a fake GitHub, a fake Slack and a
-fake Google calendar, and needs no token, no network and no running instance; it takes well under a
+fake calendar, and needs no token, no network and no running instance; it takes well under a
 second. Run it before every push. A rule change gets a case in
 `test/rules.test.js` (and, if it changes what a rule is *worth*, one in
 `test/rank.test.js`); a change to the scorer gets one in `test/rank.test.js`,
@@ -307,6 +311,11 @@ a change to delivery in webhook mode gets one in `test/slack.test.js`
 `test/notify.test.js` (the client, the three shapes, the mention per
 endpoint);
 a change to acting gets one in `test/actions.test.js` or `test/api.test.js`;
+a change to the calendar's feed parser or recurrence expansion gets one
+in `test/ics.test.js`; a change to either calendar reader, the clock's
+alarm or the calendar's reconcile gets one in `test/calendar-source.test.js`
+(the Google half first, the feed below it, against `test/fake-calendar.js`,
+which holds both);
 a change to the GitLab source — the todos, the discussions, the system
 notes, Done marking the todo, the open set — gets one in
 `test/gitlab-source.test.js` against `test/fake-gitlab.js`; a change to the
