@@ -2,7 +2,7 @@
 // triage — your queue, ranked. Sources in (sources/), verdicts out (rules/),
 // the few that interrupt to Slack (deliver/), everything in one ordered
 // list on a page. One process, one SQLite file, an HTTP API on 127.0.0.1
-// that a reverse proxy publishes. See README.md.
+// that a reverse proxy publishes. See README.md and docs/.
 import http from 'node:http';
 import { Store } from './lib/store.js';
 import { loadConfig } from './lib/config.js';

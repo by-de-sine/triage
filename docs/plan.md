@@ -6,10 +6,10 @@ decided here and recorded so the build session does not re-decide it.
 Lived in the host's own configuration repository while M0 and M1
 were built (the prompt that started the build was beside it); moved here
 2026-09-09 so the repo carries its own plan. Sections 6, 7 and 10 are
-decided; `README.md` says what the milestones have made of them. "This
+decided; the docs (`README.md` and `docs/`) say what the milestones have made of them. "This
 repo" below means the host's own configuration repository where it names `services/triage/`.
 
-**Pruned 2026-09-12 (#16), after §13 shipped as #14.** The rule: the README
+**Pruned 2026-09-12 (#16), after §13 shipped as #14.** The rule: the docs
 describes what shipped, the plan describes what is still intended. A
 section that shipped, or that §13 superseded, is collapsed here to a dated
 note carrying the decision and where it now lives; the argument is in git
@@ -55,14 +55,14 @@ per-thread comment diff is the foundation on every repo.
 
 *Decided 2026-09-08; built as M0 (#1) and unchanged in shape since: one
 process, one SQLite file, four seams — source → item → rule → delivery,
-with act as the one path every surface calls (`README.md` §The shape;
-`AGENTS.md` for how to work on them). §11 changed what the tiers are for,
+with act as the one path every surface calls (`docs/architecture.md`;
+`CONTRIBUTING.md` for how to work on them). §11 changed what the tiers are for,
 §12 widens the source seam on paper, §13 removed the model's seam.*
 
 ## 3. The tiers, and what lands in each
 
 *Decided 2026-09-08; shipped as M0 and M1 (#1, #2); the table is
-`README.md` §The tiers. Since then: the tier is a category and one input
+in each `docs/sources/` page. Since then: the tier is a category and one input
 to the rank, not a channel (§11, 2026-09-10); what interrupts is the rule
 list of §11.6 (M5, #11); the P1 batch and the P2 digest are gone (#15,
 2026-09-12); the quiet and coalesce windows survive on the interrupt path.
@@ -110,7 +110,7 @@ needed until milestone 3.
 > seam — `due(ctx)`, `describeCursor`, `item.kind` for the DM's shape, a
 > per-source map for what Done does outside triage — is the pattern
 > `AGENTS.md` tells the next source to copy; the window and the cursor are
-> `README.md` §The shape. The live poll still waits on §9 item 5.
+> `docs/sources/calendar.md`. The live poll waits on a feed URL in production (§9 item 5).
 
 ## 6. Stack, repo, deployment — decided
 
@@ -133,7 +133,7 @@ needed until milestone 3.
   one deliberate deviation from the services doctrine, since unlike its other services
   the code *is* developed. Deploy is `AGENTS.md` §Deploy.
 - **HTTP API**, bound to 127.0.0.1, published by Caddy at
-  its hostname. The surface is `README.md` §The API; it is
+  its hostname. The surface is `docs/api.md`; it is
   what Claude Code sessions and the chief-of-staff seat (§13) use.
 - **Secrets** in `~/.config/triage/.env`, mode 0600: the Slack
   line(s), optionally `GITHUB_TOKEN`, and Google's two credential files
@@ -193,6 +193,7 @@ Each is a PR or two and ends with something you use.
   GitLab (G1), the webhook shapes (G2), the demo (G3), the calendar as an
   ICS feed (G4), and the Slack app surface (G5, when the app exists). M is
   what the queue needed; G is what a developer who is not the owner needs.
+  *G1–G4 shipped 2026-10-15 (#2–#5); G5 waits on the app.*
 
 
 ## 8. Slack app manifest
@@ -212,7 +213,7 @@ ever worth an app.*
    `~/.config/triage/.env`.~~ **Superseded 2026-09-10 (§11.6 note):**
    an **incoming webhook URL** in that `.env` as `SLACK_WEBHOOK_URL`,
    pointed at a channel the owner is alone in. Done 2026-09-10; the privacy
-   requirement is in `README.md` §Run it and in the `.env`'s own comments.
+   requirement is in `docs/interrupts.md` and in the `.env`'s own comments.
    Strictly Slack issues a webhook *through* an app; what is avoided is
    its configuration, and an existing webhook avoids even the creation.
    *Not struck for good: G5 (§16.5, 2026-10-15) brings the app back as a
@@ -227,12 +228,15 @@ ever worth an app.*
    the token `gh` holds is a classic OAuth token (noted 2026-09-09), and
    GitHub's notifications endpoints accept classic tokens only. If it is
    ever replaced, triage needs its own classic token scoped to
-   `notifications` as `GITHUB_TOKEN` (`README.md` §Run it).
-5. **For M3: a Google Cloud project with an OAuth desktop client, plus the
-   consent, once, from the laptop** — the steps are the ledger row
-   and `bin/google-consent.js`'s own comments. Publish the OAuth app rather
-   than leaving it in *Testing*, or the refresh token expires weekly. Scope
-   `calendar.readonly`. **Still open** (2026-09-12).
+   `notifications` as `GITHUB_TOKEN` (`docs/sources/github.md`).
+5. ~~**For M3: a Google Cloud project with an OAuth desktop client, plus the
+   consent, once, from the laptop.**~~ **Superseded 2026-10-15 by G4
+   (§16.3):** the calendar reads an ICS feed, which needs no cloud project,
+   no client and no consent. What production needs instead is two lines in
+   its `.env` — `TRIAGE_CALENDAR_URL` (the calendar's secret iCal address)
+   and `TRIAGE_CALENDAR_ME` — and only the owner holds the URL. Until then
+   the calendar is off in production, as it always has been. The Google
+   path stays behind its own configuration (§16.7 item b).
 
 ## 10. Decisions taken here, so they are not re-litigated
 
@@ -334,7 +338,7 @@ ledger row that said M5 never got its note):*
    asked to be, and never recorded as answered:*** the base (claim and
    preference) is stored on the item, the time term is recomputed at read
    time, and hysteresis (`TRIAGE_RANK_HYSTERESIS`, 0.02) holds the order
-   still unless something moved further than that. `README.md` §The rank.
+   still unless something moved further than that. `docs/ranking.md`.
 5. ***M5 shipped without the ledger source and without `reconcile`***,
    which §12.6 had made its proving input. Its proving set was the GitHub
    backlog after all — 47 merged pull requests ranked in an order the owner
@@ -365,7 +369,7 @@ delivery system with a longer list stapled to it. The change is that the
 
 ### 11.2 What survives
 
-*All five did, and are the shipped system (`README.md`): the item store
+*All five did, and are the shipped system (`README.md` and `docs/`): the item store
 entirely; the act path, which under a ranking is also the feedback signal;
 the source seam and M3's widenings of it; the rules, promoted from a
 switch that picks a channel to a labelled observation that carries weight
@@ -449,7 +453,7 @@ moved", no items — was decided against on 2026-09-12 (§11.9).*
 > so coalescing **holds** the repeats and sends one follow-up when the
 > window ends, the first alarm is never held, the message stands as sent,
 > and there are no buttons — acting happens on the page. All of it is
-> `README.md`'s interrupt-path paragraph, above §The shape.
+> `docs/interrupts.md`.
 >
 > **The requirement, not the footnote:** a DM to `SLACK_USER_ID` was
 > private by construction and a webhook is not, so it **must target a
@@ -491,7 +495,7 @@ moved", no items — was decided against on 2026-09-12 (§11.9).*
   `items.rank` was added beside it with all four writers writing both
   (M5 note 1), and the backlog got its bounded backfill — rules re-run
   over the events the verdict on record was about, features persisted,
-  a missing feature left absent rather than zero (`README.md` §The rank).
+  a missing feature left absent rather than zero (`docs/ranking.md`).
 - **M6 · learn it** — as §7 now states it: revealed preference from
   `actions`, saturation and spread, hysteresis tuning. Structural only.
 
@@ -1162,7 +1166,7 @@ agent would otherwise reconstruct from fifty-four rows:
 
 ### 13.7 What comes out of the tree
 
-*Shipped 2026-09-12 as #14; the inventory is now `README.md` §The store
+*Shipped 2026-09-12 as #14; the inventory is now `docs/architecture.md` §Store
 and the commit that carried it.* One PR, mostly deletion: the `llm/`
 adapter, `lib/readable.js`, the `llm_jobs` and `llm_calls` tables,
 `items.summary` and `summary_at`, `decisions.acted`, the `llm` value of
@@ -1572,270 +1576,45 @@ is the pattern for everything that follows, and every further default
 moved off the box's layout needs its line in that file **before** the
 pull request that moves it merges, because merging is deploying.
 
-### 16.2 The quickstart that must be true when G3 lands
+### 16.2 The quickstart
 
-The README's opening will say this, and it is written here first so the
-milestones are built toward a sentence rather than the sentence fitted to
-what was built:
-
-> Node ≥ 24 and nothing else — `node:sqlite` and `fetch` are built in, and
-> the two npm packages are reached only under `TRIAGE_SLACK=app`.
->
-> ```bash
-> git clone https://github.com/by-de-sine/triage.git && cd triage
-> npm run demo          # http://127.0.0.1:3300 — a canned GitHub, GitLab, calendar, CRM, household and queue file, in memory, no credential
-> npm test              # node --test, fake everything, under a second
-> ```
->
-> Then your own queue: a GitHub token (`gh auth login` is enough) or a
-> GitLab token, `node server.js`, and the page shows what is waiting on you.
-> A Slack incoming webhook URL, or a Discord one, is one more line and the
-> P0s reach you within a minute. The Slack app — buttons, a DM, a Home tab
-> — is `slack/manifest.yml` and `TRIAGE_SLACK=app`.
-
-The clone line presumes a repository the reader can reach. Today that is
-a collaborator, because the repository is private (§6): the stranger half
-of the promise is only true the day §16.7 item d is taken, and public
-access is a prerequisite of *that promise*, not of G3 — the demo and the
-sentence are built for the day, and the day is the owner's. Two facts
-behind the first line were checked on 2026-10-15 rather than assumed: with `node_modules` absent, every module in the tree imports and
-all 243 tests pass, because `@slack/bolt` and `@slack/web-api` are reached
-only through the dynamic imports in `deliver/slack.js` under
-`TRIAGE_SLACK=app`. So the demo needs no install today, and no
-`optionalDependencies` entry or guarded import has to be added to keep it
-that way (§16.7 item f). The README currently says "`npm ci` for
-`@slack/bolt`, the one dependency"; there are two, and G1 corrects the row
-while it is in §Run it anyway.
+*Shipped as G3 (2026-10-15); verified 2026-10-16 from a fresh clone with no
+`node_modules`: `npm test` passes (284 tests) and `npm run demo` boots every
+source on its fake with delivery off. The sentence this section asked for is
+the README's "Try it" and "Use it". The clone line still presumes a
+repository the reader can reach — a collaborator, until §16.7 item d.*
 
 ### 16.3 The ports, in order
 
-Four things exist in the reference tree and not here, and they are the
-extraction. Numbered **G1–G4** beside §7's M-numbers — M is what the queue
-needed, G is what a stranger needs — in the order they matter to the
-owner, which is also the order of risk: G1 touches the source every
-production item comes from, G4 touches a source production has never run.
-Each one is a pull request against the four seams unchanged, and the test
-each has to pass is the one M3 set: **nothing in `lib/` or `deliver/`
-learns the new thing's name**.
+*G1–G4 shipped 2026-10-15 as #2–#5. What each became is in the docs; the
+argument and the port-by-port inventory are in git (`git show
+a9cb70e:docs/plan.md` is the last full text of this section). Each passed
+the test M3 set: nothing in `lib/` or `deliver/` learned the new thing's
+name.*
 
-Every port carries the same trap, so it is stated once: the reference was
-cut on 2026-09-20 and **main moved on without it**. What main has that the
-reference predates is listed per milestone below; it was found by diffing
-the shared files, not by reading the reference's README, and a port that
-copies a reference file over a main file loses it. The reference's shared
-files differ from main's in every one of `store`, `pipeline`, `rules`,
-`rank`, `lists`, `actions`, `api`, `aggregates`, `reports`, `backfill`,
-`util` and `interrupts`; none of those files is copied, ever. What crosses
-is the four features, re-fitted.
+- **G1 · the forge layer and GitLab** (#2): `lib/forge-api.js` — one
+  `RestApi`, with `GitHubApi` and `GitLabApi` over it — `sources/gitlab.js`,
+  and `rules/thread.js` replacing `rules/github.js`. Two seam widenings,
+  `whoami(ctx)` and `mark(item, ctx)`. The GitHub fixtures passed
+  unchanged, which was the proof the abstraction cost GitHub nothing.
+  Now `docs/sources/gitlab.md` and `docs/architecture.md`.
+- **G2 · the webhook shapes** (#3): `deliver/notify.js` and
+  `deliver/messages.js` — `slack`, `discord`, `generic` — with
+  `TRIAGE_NOTIFY`, and `TRIAGE_WEBHOOK_URL` reading `SLACK_WEBHOOK_URL` as an
+  alias. The `slack` shape was proven against the real Slack webhook on
+  2026-10-16: a real interrupt captured from a worktree's loopback listener
+  and re-sent once by hand was answered `200 ok`. Now `docs/interrupts.md`.
+- **G3 · the demo** (#4): `TRIAGE_DEMO=1`, a `fake` mode on both forges,
+  and no default `.env` read under the demo. Now the README and
+  `docs/configuration.md`.
+- **G4 · the calendar as an ICS feed** (#5): `lib/ics.js` and a feed reader
+  beside the Google one, and the calendar became state. Five bugs in the
+  reference did not cross (an open-ended `RRULE` that never reached today,
+  29 February, all-day dates at UTC midnight, Windows zone names, an
+  override moved into the window). Production has not turned it on (§9
+  item 5). Now `docs/sources/calendar.md`.
 
-**G1 · the forge layer, and GitLab.** *Replaces* `rules/github.js` with
-`rules/thread.js` — one thread-shaped rule set, because a reply on GitLab
-is the same observation as a reply on GitHub, and the events a forge
-emits (`notification`, `opened`, `comment`, `review_comment`, `review`,
-`review_request`, `state`, `open`) are already the vocabulary; and
-`lib/github-api.js` with `lib/forge-api.js` — one `RestApi` (deadline,
-conditional requests, paging, the rate-limit headers) and two thin clients
-over it, `GitHubApi` (`Bearer`, `X-Poll-Interval`, `TRIAGE_GITHUB_URL` for
-Enterprise) and `GitLabApi` (`PRIVATE-TOKEN`, `TRIAGE_GITLAB_URL` for a
-self-hosted instance). *Adds* `sources/gitlab.js` — todos as the inbox,
-the merge requests and issues that are yours updated since the cursor,
-the open issues of `TRIAGE_GITLAB_ISSUES` as state, discussions turned
-into the thread events, system notes read for approvals, review requests,
-merges and closes — with `test/fake-gitlab.js` (Alice, Bob, Carol,
-`acme/*`: the fixtures stay the fixtures) and `lib/forge.js` for what the
-two share (the news set, the time curve, the repository-list parser).
-*Widens the seam twice*, generically: a source may declare **`whoami(ctx)`**
-— who the items belong to on this source, resolved once at boot in
-`server.js` into an identity map, so `me` in a rule is the GitLab username
-on a GitLab item and the GitHub login on a GitHub one — and **`mark(item,
-ctx)`** — what Done does at the far end, which is the `marks` map
-`server.js` already builds, with the entry now supplied by the source
-rather than written beside it; GitHub's mark-as-read moves out of
-`lib/actions.js` (where it is the one source-specific branch left in
-`lib/`) into `sources/github.js`, and Done on a GitLab item marks the todo
-done. `GITLAB_TOKEN` falls back to what `glab auth token` holds as
-`GITHUB_TOKEN` does with `gh`; a box without `glab` reads as "no token",
-not as an error. A forge registers when its token resolves; `TRIAGE_GITHUB`
-and `TRIAGE_GITLAB` take `on` (fail loudly without one) or `off`; with no
-source configured at all the process says so and exits, as it does today
-for GitHub alone.
-
-*What it must carry that the reference predates:* **`new_pull_request`**
-(2026-10-15, with its day-old bound and `now` in the match context — the
-reference has fifteen thread rules and main has sixteen); **the `user`
-column**, which the reference dropped and main keeps on every query — it
-stays, and after G1 it is **whoever the store already files items under**,
-so adding a forge later never re-keys a queue; on an empty store it is
-the GitHub login when GitHub is on, else the GitLab username, and from
-then on it is stable. `me` is per source. A boot whose identities include
-nobody the store belongs to says so in the log rather than filing a second
-person's items beside the first's; **per-owner tokens** from
-`TRIAGE_TOKENS_DIR` (`tokenFor` on `GitHubApi`, which the reference never
-had), extended while it is open to read an owner's `gh` config directory
-as the queue row of 2026-10-10 asks; **`TRIAGE_ISSUES`** keeps its meaning
-as an alias of `TRIAGE_GITHUB_ISSUES`, so production's `.env` is not a
-prerequisite; **case-insensitive login compare** in every rule, which main
-has by `same()` and the reference by `sameLogin()`; the default interrupt
-set with `new_pull_request` and the three CRM rules on it; `bin/replay.js`
-learning `group/project!12`; **the identity map reaching every reader of "you"** — the
-pipeline's trigger and role refinement, the backfill, and the `when`
-report, all of which compare an actor to the one `user` today and after
-G1 compare to `identity[item.source]`, through the map and never by name;
-**`sameLogin` in `lib/util.js`**, replacing the exact compares the
-pipeline and the `when` report still make, and **`isBot` widened** to GitLab's
-`project_N_bot`/`group_N_bot` and `ghost`; `nextLink` moved from
-`sources/github.js` into `lib/util.js` beside the paging it serves; and the
-GitHub fixtures and `test/github-source.test.js` passing **unchanged**,
-which is the proof the abstraction cost GitHub nothing. *Tests:* `test/gitlab-source.test.js`
-against the fake (the inbox, the discussions, Done marking the todo, open
-issues reconciled through the runner), `test/rules.test.js` re-pointed at
-`rules/thread.js`, and the suite at 243 or more. *README:* §The shape (the
-source contract gains `whoami` and `mark`), §The tiers (the thread table
-names both forges), §Run it (every new row, and the dependency count),
-§Deploy (the same count), §Acting on it (Done on GitLab, and the sentence
-"a `marks` entry, not a branch in `act()`" becoming true of GitHub too).
-*AGENTS.md:* "Where things are", the tests table, the "nothing in `lib/`
-says github" claim (true after G1, not before), the CRM's line count
-(three variables turn it on, not four), and "what is next" (G1, not M6).
-*`.env.example`:* the GitLab block, and the GitHub block's header, which
-says "always on" and stops being so. *Production prerequisite:* none —
-GitLab is off until a token is set, and the owner has no GitLab token on
-the box today, so the source is proven against its fake and the pull
-request says so rather than claiming a live read. *Cost:* the largest of
-the four by reading, the smallest by risk if the GitHub fixtures stay
-green; one session.
-
-**G2 · the webhook shapes.** *Sits beside* `deliver/slack.js`'s app half,
-*replaces* `deliver/webhook.js`: `deliver/notify.js` is one webhook client
-and the half of delivery that is the same for every endpoint — the
-interrupt guard, the age guard, the quiet window, the coalesce window as
-hold-and-follow-up, the answer on every decision row — and
-`deliver/messages.js` is three shapes, **`slack`** (the incoming webhook
-main already sends to, so the production message does not change: it is
-`deliver/blocks.js`'s message without the act buttons, exactly as today),
-**`discord`** (one markdown message, a mention up front) and **`generic`**
-(the text and the structure both — item, decision, event — so a script on
-the far end can do what it likes). Within each shape the message
-is drawn by `item.kind`, never by `item.source`, as `blocks.js` already
-does. `TRIAGE_NOTIFY` names
-the shape — `slack` · `discord` · `generic` · `off`, unset inferred from
-`TRIAGE_WEBHOOK_URL`'s host, `off` without one — and is the only switch
-for the webhook half. `TRIAGE_SLACK` keeps `app | off` for the app half,
-and its old `webhook` value, with `SLACK_WEBHOOK_URL`, is read as
-`TRIAGE_NOTIFY=slack` with `TRIAGE_WEBHOOK_URL` (§16.7 item e). The two
-halves do not infer from each other: under `TRIAGE_NOTIFY=discord` the
-app is off unless `TRIAGE_SLACK=app` says so, and `TRIAGE_SLACK=app` means
-the app and not the webhook — one process posts to one place. `TRIAGE_MENTION` keeps its meaning per mode: a Slack id or
-`!here`, a Discord id or role or `@here`, any text for generic, and a bare
-name is still refused where it would notify nobody (§14.1).
-
-*What it must carry:* `handlers.js`, `blocks.js` and `slack/manifest.yml`
-untouched; the decision notes as written today (`sent webhook`, `held:
-quiet window until …`, `held: coalescing until …`, `not delivered: …`),
-the wake path's note, the age guard, and the `reflect` that drops a held
-follow-up when you act — all of which `test/slack.test.js` and
-`test/interrupts.test.js` assert and all of which keep passing; the
-`SLACK_WEBHOOK_URL` alias, named in the README row, so production's `.env`
-does not break on merge; `https` only off loopback, the host never the
-path, a known failure reason repeated and an unknown body counted;
-`deliveries.message_ts` keeps its name (the reference renamed it, and the
-store is not copied). *Tests:*
-`test/notify.test.js` for the three shapes and the per-mode mention,
-beside the two above. *README:* §The shape (delivery has two halves: the
-webhook, any of three shapes; the app), §Run it (`TRIAGE_NOTIFY`,
-`TRIAGE_WEBHOOK_URL`, the alias row, `TRIAGE_MENTION` per mode).
-*`.env.example`:* the interrupts block. *Production prerequisite:* none,
-because of the alias; the two lines can be renamed at leisure and the row
-says which. *Proof:* a worktree instance posting one interrupt to a
-`generic` listener it starts itself — never the owner's Slack URL, which no
-worktree carries. *Cost:* small; the reference's `notify.js` is main's
-`slack.js` with the Bolt half removed, so the port is mostly moving the
-webhook half out and leaving the app half where it is.
-
-**G3 · the demo.** *Wiring.* `TRIAGE_DEMO=1` boots every fake the tree has
-— `test/fake-github.js`, `test/fake-gitlab.js`, `test/fake-calendar.js`,
-`test/fake-twenty.js`, `test/fake-ha.js`, and a queue file written to a
-temp dir the way `test/ledger.test.js` writes one — with the store in
-memory unless `TRIAGE_DB` says otherwise, identities set to the fixtures'
-(`alice`), and delivery **off** unless the webhook URL is loopback, because
-"no credential" has to mean nothing leaves the box. Main already has
-`TRIAGE_CALENDAR=fake`, `TRIAGE_HA=fake` and `TRIAGE_CRM=fake` separately;
-the one flag sets all of them and the two forges, and `npm run demo` is
-the script. *Must carry:* the three existing `fake` modes keep working on
-their own, because a worktree proving one source wants one fake, not six.
-*Tests:* a boot test that the demo configuration resolves to every fake
-and to delivery off. *README:* the quickstart of §16.2, verbatim, at the
-top. *`.env.example`:* one line. *Production prerequisite:* none.
-*Cost:* an afternoon.
-
-*Built 2026-10-15, three things beyond the paragraph above.* (1) The two
-forges gained a `fake` mode (`TRIAGE_GITHUB=fake`, `TRIAGE_GITLAB=fake`)
-like the other three sources, so the demo is one rule — every source's
-mode becomes `fake` unless that source says `off` — and one forge can be
-proved alone; the GitHub fake's `demoGithub()` is ported from the
-reference with the fixtures' names. (2) With `TRIAGE_DEMO` in the
-environment the default `.env` is not read, so a stranger's own
-`TRIAGE_DB` cannot collect the demo's items; a `TRIAGE_ENV` that is named
-is read, which is how a worktree runs the demo. The app path's tokens are
-dropped and a non-loopback webhook URL is not even held. (3)
-`TRIAGE_HA=fake` reads the fake's two lists when `HA_LISTS` names none —
-it had read nothing on its own. The quickstart sits at the top of
-README §Run it, with a pointer to it in the README's opening line.
-
-**G4 · the calendar as an ICS feed.** *Sits beside* the Google path and
-is the default reading of `TRIAGE_CALENDAR_URL` or `TRIAGE_CALENDAR_FILE`:
-`lib/ics.js` (enough of RFC 5545 — unfolding, zones through `Intl`, all-day
-entries, `EXDATE`, `RECURRENCE-ID`, and `RRULE` for daily, weekly, monthly
-and yearly with `INTERVAL`, `COUNT` and `UNTIL`; stdlib only) and a reader
-in `sources/calendar.js` that fetches the feed conditionally, expands the
-window, and keys an event on a hash of what a rule reads, so a reschedule
-re-tiers it and an unchanged feed emits nothing. Every calendar publishes
-one — Google's "secret address in iCal format", Outlook's "publish
-calendar", a Fastmail or Apple subscription URL — so there is no OAuth
-client, no cloud project, no consent script and no weekly token expiry;
-the URL is the credential and is treated as one. `TRIAGE_CALENDAR_ME` is
-your address on invitations, so `new_invitation` can be yours to answer.
-`TRIAGE_CALENDAR` becomes `off | google | ics | fake`, unset inferring
-`ics` when a feed is named, `google` when the credentials resolve, off
-otherwise. *Must carry:* `due` (the fifteen-minute alarm from the clock),
-`starts_in_15_min` and `new_invitation` on the interrupt set under their
-present names, the `spike`/`flat` curves, `project` as the calendar's id
-(the feed's name), the Join link, and `test/fake-calendar.js` — which
-gains an ICS text beside the Google-shaped list it holds, so
-`TRIAGE_CALENDAR=fake` runs whichever path is the default and the Google
-fake leaves with the Google path (§16.7 item b). *Gains:* the
-calendar becomes state too — an event deleted from the feed leaves the
-set and is resolved by the source, which the Google path never did.
-*Tests:* `test/ics.test.js` (the parser and the expansion, with a fixture
-whose dates are derived from `NOW`, since the reference's one failing test
-is a fixture pinned to a date thirty days ago), `test/calendar-source.test.js`
-over the feed. *README:* §The shape, §The tiers (unchanged names), §Run it
-(three rows, and the Google rows marked as the other path). *Production
-prerequisite:* two lines in the production `.env` — the feed URL and
-`TRIAGE_CALENDAR_ME` — **if** the owner wants it on; nothing breaks
-without them, since the calendar is off in production today and stays off.
-*Cost:* the largest by code (the parser is a third of the port) and the
-smallest by risk to production, which has never run this source.
-
-*Built 2026-10-15, with what the port fixed in the reference and the
-choices it took.* One source with two readers, picked by whether the
-context carries `feed` or `api`: the Google half is main's, untouched, and
-the shared half (`due`, `time`, `project`, the item's shape, the rules) is
-the same for both, so `rules/calendar.js` did not change. Five reference
-bugs did not cross: an open-ended `RRULE` stopped at 2,000 candidates from
-`DTSTART`, so a daily standup created more than about five years ago
-never reached today (a rule without `COUNT` now starts its walk near the
-window); a yearly 29 February rolled into 1 March; an all-day date was
-read at UTC midnight rather than yours; a `TZID` that `Intl` does not
-know — every Windows name Outlook writes — read as UTC (a small Windows
-map, then your zone); and an override moved into the window from an
-occurrence outside it was lost. Two additions: the feed's URL is fetched
-at most every `TRIAGE_CALENDAR_EVERY_MIN` (5) and the cached text
-re-expanded every minute, so the window and the alarm still move without
-a request a minute against a published feed; and a poll emits only the
-instances whose hash moved, so the store does no work for an unchanged
-feed. `TRIAGE_CALENDAR=fake` reads `demoIcs()`; `demoCalendar()` stays
-for the Google half's tests and leaves with it.
+What is left of §16 is G5 (§16.5) and the open calls in §16.7.
 
 ### 16.4 What stays, and why
 
@@ -1858,7 +1637,7 @@ for the Google half's tests and leaves with it.
   generalises into "a markdown table of rows with an owner column" or
   waits outside the repository until the day it is open-sourced. The
   recommendation is neither, yet: the format is already a written contract
-  (`README.md` §Asking through the ledger, which an agent or a script
+  (`docs/sources/ledger.md` §Asking through the ledger, which an agent or a script
   writes to), the owner-kind vocabulary is the only truly local part and is
   config-shaped, and a stranger with a table of their own would have to
   adopt the columns to get the asks anyway. A parser with options buys that
@@ -1940,23 +1719,15 @@ is said.
   repository goes public, as a `LICENSE` file and the one word in
   `package.json`. The plan names it; no file lands before that day, and
   nothing in this section makes the repository public.
-- **(e) The webhook variable, now that there are three shapes.** *Default,
-  recommended:* `TRIAGE_WEBHOOK_URL`, with `SLACK_WEBHOOK_URL` read as an
-  alias for as long as a `.env` carries it, and the README row naming both.
-  Decided here, built in G2.
-- **(f) Whether `npm run demo` must work with no install.** *Default,
-  recommended:* yes — and it already does (§16.2, verified 2026-10-15), so
-  the only work is the sentence in the README when G3 lands.
+- **(e) The webhook variable.** *Built in G2:* `TRIAGE_WEBHOOK_URL`, with
+  `SLACK_WEBHOOK_URL` read as an alias for as long as a `.env` carries it.
+- **(f) Whether `npm run demo` must work with no install.** *Yes, and it
+  does* (verified 2026-10-16, §16.2).
 
-### 16.8 The reference, and when it goes
+### 16.8 The reference
 
-`~/src/triage-open` on the owner's box: one commit (2026-09-20), no remote,
-74 tests of which 73 pass — the one failure is a fixture pinned to a date
-now outside a thirty-day report window, which is a rotted tree and not a
-bug. It has the same seams, rule names and claim values as main (its store
-differs: no `user` column, and `deliveries.message_id` for `message_ts`),
-lacks the CRM, ledger and Home Assistant sources and `new_pull_request`,
-and has the four things above. It is read as a design source: nothing is
-merged from it, cherry-picked from it, or given a remote. **When G1–G4
-are merged it is deleted**, and this paragraph is the record of what it
-was.
+*Retired 2026-10-16, G1–G4 having merged.* `~/src/triage-open` on the
+owner's box was a one-commit rewrite of this tree (2026-09-20, no remote),
+read as the design source for the four ports and never merged from. It is
+archived beside triage's own backups, and this paragraph is the record of
+what it was.
