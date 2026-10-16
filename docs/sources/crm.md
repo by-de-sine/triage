@@ -10,7 +10,8 @@ It is **state and a feed at once**:
   Twenty is resolved by the source — only against a read that saw every
   page.
 - **Feed:** a task or note created or changed by somebody who is not you is
-  news, and it interrupts when it lands on something of yours.
+  news. By default it interrupts only when it lands on a task assigned to
+  you (the P0 rules below); the rest is placed in the list.
 
 ## Who is "not you"
 

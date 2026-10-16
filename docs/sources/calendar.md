@@ -24,8 +24,8 @@ is the credential**, so it is never logged, stored or returned by the API
   (`<UID>@<occurrence>`). Its event key hashes what a rule reads, so a
   reschedule, a cancellation or an answer re-tiers it, and an unchanged
   feed emits nothing.
-- **It is state, too:** an event gone from the feed is resolved by the
-  source.
+- **It is state, too:** an event absent from a complete read of the feed
+  is resolved by the source. A failed or incomplete read resolves nothing.
 - Redirects are followed by hand, at most five and only to `https`; a body
   past 20 MB is abandoned as it streams.
 

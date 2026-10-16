@@ -5,9 +5,9 @@ runs it, not to this repository.
 
 - **One Node process**, started from `<checkout>/server.js`. Nothing to
   build, no artifact, no container. Node ≥ 24 (for `node:sqlite`).
-- **A deploy** is the checkout at the new commit, `npm ci` if and only if
-  `package-lock.json` changed, and a restart. The lock file matters: the
-  two packages (`@slack/bolt`, `@slack/web-api`) are loaded only under
+- **A deploy** is the checkout at the new commit, `npm ci` when
+  `package-lock.json` changed or `node_modules` is absent, and a restart.
+  The lock file matters: the two packages (`@slack/bolt`, `@slack/web-api`) are loaded only under
   `TRIAGE_SLACK=app`, so a stale `node_modules` starts fine and fails at
   the first import on that path.
 - **The store migrates itself at boot**, idempotently, and drops nothing

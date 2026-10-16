@@ -24,7 +24,10 @@ every surface calls. Those seams are the design, and they stay intact:
   `act()` and nowhere else.
 - A rule is pure and returns a reason or null.
 - Delivery reads decisions and writes what it did onto them.
-- Nothing in `lib/` or `deliver/` knows a source's name. Delivery picks a
+- Nothing in `lib/` or `deliver/` knows a source's name, except the API
+  clients that speak a far end's protocol (`lib/forge-api.js`,
+  `lib/ics.js`, `lib/google-api.js`, `lib/ha-api.js`, `lib/twenty-api.js`),
+  which no runner, rule or delivery code branches on. Delivery picks a
   message's shape from `item.kind`, never `item.source`.
 
 There is **no model** and no seam for one ([plan §13](plan.md)). Triage

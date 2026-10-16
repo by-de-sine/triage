@@ -1589,8 +1589,9 @@ repository the reader can reach — a collaborator, until §16.7 item d.*
 *G1–G4 shipped 2026-10-15 as #2–#5. What each became is in the docs; the
 argument and the port-by-port inventory are in git (`git show
 a9cb70e:docs/plan.md` is the last full text of this section). Each passed
-the test M3 set: nothing in `lib/` or `deliver/` learned the new thing's
-name.*
+the test M3 set: outside the clients that speak each far end's protocol
+(`lib/forge-api.js`, `lib/ics.js`), nothing in `lib/` or `deliver/`
+learned the new thing's name.*
 
 - **G1 · the forge layer and GitLab** (#2): `lib/forge-api.js` — one
   `RestApi`, with `GitHubApi` and `GitLabApi` over it — `sources/gitlab.js`,

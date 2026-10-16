@@ -41,7 +41,9 @@ docs/            the documentation and the plan
 surface calls ([architecture](docs/architecture.md)). Keep them intact:
 
 - A new source is a file in `sources/` and a file in `rules/`, never a
-  branch in the runner. Nothing in `lib/` or `deliver/` may learn its name.
+  branch in the runner. Nothing in `lib/` or `deliver/` may learn its name,
+  apart from an API client for its far end (`lib/forge-api.js`,
+  `lib/twenty-api.js`, …).
 - A new surface — a button, a page, a command — ends in `lib/actions.js`
   `act()`.
 - A rule is pure and returns a reason or null.
@@ -54,7 +56,8 @@ member of the source contract arrived — `due` and `describeCursor` for the
 calendar, `time` for ranking, `reconcile` and `governs` for state-shaped
 sources, `project` for interrupt preferences, `whoami` and `mark` for a
 second forge — each a map built at boot from the registered sources. The
-test a change has to pass: nothing in `lib/` says the new thing's name.
+test a change has to pass: nothing in `lib/` outside an API client says the
+new thing's name.
 
 A change that crosses a seam changes the design, and goes in
 [`docs/plan.md`](docs/plan.md) first.

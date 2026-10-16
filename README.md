@@ -38,7 +38,8 @@ app.
 
    ```bash
    TRIAGE_WEBHOOK_URL=https://hooks.slack.com/services/…
-   TRIAGE_MENTION=U0123ABCD    # your Slack member id — without it the message is a badge, not a notification
+   # Your Slack member id. Without it the message is a badge, not a notification.
+   TRIAGE_MENTION=U0123ABCD
    ```
 
    A Discord webhook or any endpoint that takes JSON works too.
