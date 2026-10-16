@@ -79,7 +79,7 @@ export const INTERRUPTS = {
  *  **This is a guard, not a trigger.** It says these may reach Slack; it does
  *  not say they do. `lib/pipeline.js` `wake()` sends a woken P0 at once and
  *  puts anything else back in the list at a fresh rank — which is what
- *  README §Acting on it promises. A P1 that wakes is placed, not sent. */
+ *  docs/using.md §Acting promises. A P1 that wakes is placed, not sent. */
 export const ALWAYS = ['snooze_wake'];
 
 export const LAYERS = ['default', 'prefs', 'prefs-project', 'env'];
