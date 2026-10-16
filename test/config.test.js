@@ -53,6 +53,7 @@ test('the webhook has three shapes: TRIAGE_NOTIFY as typed, else inferred from t
   assert.equal(cfg({ TRIAGE_NOTIFY: 'generic', TRIAGE_WEBHOOK_URL: slack }).slack.notify, 'generic', 'typed wins over the host');
   assert.equal(cfg({ TRIAGE_NOTIFY: 'off', TRIAGE_WEBHOOK_URL: slack }).slack.mode, 'off', 'TRIAGE_NOTIFY=off is the webhook off, URL or not');
   assert.equal(cfg({ TRIAGE_NOTIFY: 'off', TRIAGE_WEBHOOK_URL: slack, SLACK_BOT_TOKEN: 'xoxb' }).slack.mode, 'app');
+  assert.throws(() => cfg({ TRIAGE_SLACK: 'webhook', TRIAGE_NOTIFY: 'off', TRIAGE_WEBHOOK_URL: slack }), /TRIAGE_SLACK=webhook with TRIAGE_NOTIFY=off/, 'the two typed against each other is refused, not resolved');
   assert.throws(() => cfg({ TRIAGE_NOTIFY: 'teams' }), /TRIAGE_NOTIFY must be off, slack, discord, generic \(got teams\)/);
   // The mention is checked in the grammar of the shape it goes to.
   assert.equal(cfg({ TRIAGE_WEBHOOK_URL: 'https://discord.com/api/webhooks/1/abc', TRIAGE_MENTION: '12345' }).slack.mention, '<@12345>');

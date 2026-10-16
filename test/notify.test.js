@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { Store } from '../lib/store.js';
 import { SlackDelivery } from '../deliver/slack.js';
 import { webhookClient, webhookHost, inferMode, parseMention, isLoopback } from '../deliver/notify.js';
-import { slackMessage, discordMessage, genericMessage, parts, plainText } from '../deliver/messages.js';
+import { slackMessage, discordMessage, genericMessage, discordAllowedMentions, parts, plainText } from '../deliver/messages.js';
 import { p0Message } from '../deliver/blocks.js';
 import { fakeWebhook } from './fake-webhook.js';
 
@@ -24,6 +24,7 @@ test('the slack shape is blocks.js without the act buttons — the webhook and t
 test('the discord shape: markdown, a mention up front, links wrapped so nothing unfurls', () => {
   const d = discordMessage({ item, decision, event, mention: '<@123>' });
   assert.equal(d.content, '<@123> **Fix <the> thing** — bob mentioned you\no/r\n> hey @alice look at this\n[Open](<https://github.com/o/r/pull/1#c>)');
+  assert.deepEqual(d.allowed_mentions, { parse: [], users: ['123'] });
   const m = discordMessage({ item: meeting, decision: { reason: 'starts in 12 min' }, event: null });
   assert.match(m.content, /^\*\*Design review\*\* — starts in 12 min\n<t:\d+:f> · Room 2 · with Bob Lee, carol, D and 1 more\n\[Join\]\(<https:\/\/meet\/x>\) · \[Open\]\(<https:\/\/cal\/e1>\)$/);
 });
@@ -42,6 +43,20 @@ test('the generic shape: the text and the structure both, the body cut to a line
   const p = parts({ item: meeting, decision: null, event: null });
   assert.deepEqual(p.links.map((l) => l.text), ['Join', 'Open']);
   assert.equal(plainText({ title: 't', what: 'w', where: null, when: null, quote: null, links: [], url: null }), 't — w');
+});
+
+test('discord may notify the configured mention and nobody else — not a <@id> a commenter typed', () => {
+  assert.deepEqual(discordAllowedMentions(null), { parse: [] });
+  assert.deepEqual(discordAllowedMentions('<@42>'), { parse: [], users: ['42'] });
+  assert.deepEqual(discordAllowedMentions('<@&7>'), { parse: [], roles: ['7'] });
+  assert.deepEqual(discordAllowedMentions('@here'), { parse: ['everyone'] });
+  assert.deepEqual(discordAllowedMentions('@everyone'), { parse: ['everyone'] });
+  const quoted = discordMessage({ item, decision, event: { ...event, body: 'ping <@999> and <@&5> and @everyone' } });
+  assert.ok(quoted.content.includes('<@999>'), 'the quote is what was written');
+  assert.deepEqual(quoted.allowed_mentions, { parse: [] }, 'and it notifies nobody');
+  const role = discordMessage({ item, decision, event, mention: '<@&7>' });
+  assert.ok(role.content.startsWith('<@&7> '));
+  assert.deepEqual(role.allowed_mentions, { parse: [], roles: ['7'] });
 });
 
 test('the shape is inferred from the host, and the mention is checked per endpoint', () => {
@@ -73,7 +88,14 @@ test('the client: the payload on the wire, no message id back, the host and neve
   assert.equal(hook.requests[0].url, hook.url);
   assert.equal(hook.requests[0].init.method, 'POST');
   assert.equal(hook.requests[0].init.headers['content-type'], 'application/json');
+  assert.equal(hook.requests[0].init.redirect, 'error', 'a redirect would carry the body elsewhere');
   assert.deepEqual(hook.posts[0], { text: 'hi' });
+  const dc = fakeWebhook({ url: 'https://discord.com/api/webhooks/1/abc', body: '{"id":"9"}' });
+  const confirmed = webhookClient(dc.url, { fetch: dc.fetch, confirm: true });
+  assert.deepEqual(await confirmed.post({ content: 'x' }), { ok: true, id: null });
+  assert.equal(dc.requests[0].url, 'https://discord.com/api/webhooks/1/abc?wait=true', 'Discord is asked to answer once the message is saved');
+  const redirected = fakeWebhook({ status: 307, body: '' });
+  await assert.rejects(webhookClient(redirected.url, { fetch: redirected.fetch }).post({}), /HTTP 307/);
   assert.equal(c.host, 'hooks.slack.com');
   assert.equal(webhookHost('https://hooks.slack.com/services/T1/B1/secret'), 'hooks.slack.com');
   assert.equal(webhookHost('not a url'), 'invalid url');
@@ -108,7 +130,7 @@ const setup = ({ notify, url = 'https://hooks.example.com/triage', mention = nul
   const store = new Store();
   const { item: it } = store.upsertItem({ user: 'alice', source: 'github', key: 'o/r#1', kind: 'pull', title: 'Fix it', url: 'https://github.com/o/r/pull/1', repo: 'o/r', last_activity: '2026-09-08T12:00:00Z' });
   const hook = fakeWebhook({ url });
-  const d = new SlackDelivery(store, { mode: 'webhook', notify, webhookUrl: hook.url, mention, client: webhookClient(hook.url, { fetch: hook.fetch }), tz: 'UTC', now: () => new Date('2026-09-08T12:05:00Z') });
+  const d = new SlackDelivery(store, { mode: 'webhook', notify, webhookUrl: hook.url, mention, client: webhookClient(hook.url, { fetch: hook.fetch, confirm: notify === 'discord' }), tz: 'UTC', now: () => new Date('2026-09-08T12:05:00Z') });
   return { store, item: it, hook, d };
 };
 
@@ -124,12 +146,19 @@ test('delivery posts the shape TRIAGE_NOTIFY names, and says so on the decision 
   const dc = setup({ notify: 'discord', url: 'https://discord.com/api/webhooks/1/abc', mention: '<@42>' });
   await dc.d.deliver({ item: dc.item, decision, event });
   assert.ok(dc.hook.posts[0].content.startsWith('<@42> **Fix it** — bob mentioned you\no/r'));
-  assert.equal(Object.keys(dc.hook.posts[0]).join(), 'content');
+  assert.equal(Object.keys(dc.hook.posts[0]).join(), 'content,allowed_mentions');
   const sl = setup({ notify: undefined, url: 'https://hooks.slack.com/services/T/B/x' });
   await sl.d.deliver({ item: sl.item, decision, event });
   assert.ok(Array.isArray(sl.hook.posts[0].blocks), 'unset is slack, which is what every webhook before G2 was');
   assert.equal(sl.d.notify, 'slack');
   assert.throws(() => new SlackDelivery(new Store(), { mode: 'webhook', notify: 'teams', webhookUrl: 'https://x/y' }), /TRIAGE_NOTIFY must be/);
+  // off is off, a URL or not: no shape is substituted for it.
+  const off = setup({ notify: 'off', url: 'https://hooks.slack.com/services/T/B/x' });
+  assert.equal(off.d.enabled, false);
+  assert.equal((await off.d.deliver({ item: off.item, decision, event })).note, 'not delivered: the webhook is off (TRIAGE_NOTIFY=off)');
+  assert.equal(off.hook.posts.length, 0);
+  assert.equal(dc.d.describe().webhook, 'discord.com');
+  assert.match(dc.hook.requests[0].url, /\?wait=true$/, 'a discord delivery asks for confirmation');
 });
 
 test('the app half is untouched by the shape: app mode draws the interactive message and ignores notify', () => {

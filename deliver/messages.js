@@ -49,8 +49,23 @@ export function slackMessage({ item, decision, event, mention = null }) {
   return p0Message({ item, decision, event, interactive: false, mention });
 }
 
-/** Discord's `{content}`: markdown, one message, a mention up front. A
- *  link is wrapped in `<…>` so Discord does not unfurl it. */
+/** What Discord may notify from this message: the configured mention and
+ *  nothing else. Discord parses user mentions out of `content` by default,
+ *  so a commenter who typed `<@123>` in a thread would otherwise ping that
+ *  person through triage; and a role or `@here` is parsed only when named
+ *  here. Nothing in event text is ever allowed to notify. */
+export function discordAllowedMentions(mention) {
+  const m = String(mention || '');
+  let r;
+  if ((r = /^<@(\d+)>$/.exec(m))) return { parse: [], users: [r[1]] };
+  if ((r = /^<@&(\d+)>$/.exec(m))) return { parse: [], roles: [r[1]] };
+  if (/^@(here|everyone)$/.test(m)) return { parse: ['everyone'] };
+  return { parse: [] };
+}
+
+/** Discord's `{content, allowed_mentions}`: markdown, one message, a
+ *  mention up front. A link is wrapped in `<…>` so Discord does not
+ *  unfurl it. */
 export function discordMessage({ item, decision, event, mention = null }) {
   const p = parts({ item, decision, event });
   const when = (iso) => `<t:${Math.floor(Date.parse(iso) / 1000)}:f>`;
@@ -59,7 +74,7 @@ export function discordMessage({ item, decision, event, mention = null }) {
   const lines = [`${at}**${p.title}** — ${p.what}${bits ? `\n${bits}` : ''}`];
   if (p.quote) lines.push(`> ${p.quote}`);
   if (p.links.length) lines.push(p.links.map((l) => `[${l.text}](<${l.url}>)`).join(' · '));
-  return { content: lines.join('\n') };
+  return { content: lines.join('\n'), allowed_mentions: discordAllowedMentions(mention) };
 }
 
 /** A generic JSON endpoint gets the text and the structure both. The body

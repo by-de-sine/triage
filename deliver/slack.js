@@ -104,9 +104,10 @@ export class SlackDelivery {
   constructor(store, { mode = null, notify = null, webhookUrl = null, botToken, appToken, userId, user = null, quiet = '23:00-07:00', tz = Intl.DateTimeFormat().resolvedOptions().timeZone, coalesceMs = 600_000, maxAgeMs = 86_400_000, interrupts = INTERRUPTS, projects = {}, mention = null, rank = null, client = null, now = () => new Date(), log = () => {} } = {}) {
     this.store = store;
     // Which shape the webhook posts (deliver/messages.js). `slack` unless
-    // told otherwise, which is what every webhook before G2 was.
+    // told otherwise, which is what every webhook before G2 was; `off` is
+    // the webhook half off, a URL or not — never a shape substituted.
     if (notify && !NOTIFY_MODES.includes(notify)) throw new Error(`TRIAGE_NOTIFY must be ${NOTIFY_MODES.join(', ')} (got ${notify})`);
-    this.notify = notify && notify !== 'off' ? notify : 'slack';
+    this.notify = notify || 'slack';
     // lib/config.js always names the mode; constructed directly (the tests,
     // bin/) a webhook URL means `webhook` and anything else means `app`,
     // which is what every caller predating §11.6 meant.
@@ -182,7 +183,7 @@ export class SlackDelivery {
 
   get enabled() {
     if (this.mode === 'off') return false;
-    if (this.webhook) return !!(this.webhookUrl || this.client);
+    if (this.webhook) return this.notify !== 'off' && !!(this.webhookUrl || this.client);
     return !!(this.userId && (this.client || this.botToken));
   }
 
@@ -192,6 +193,7 @@ export class SlackDelivery {
    *  `TRIAGE_SLACK` would send someone looking in the wrong place. */
   get disabledReason() {
     if (this.mode === 'off') return 'not delivered: slack is off (TRIAGE_SLACK=off)';
+    if (this.webhook && this.notify === 'off') return 'not delivered: the webhook is off (TRIAGE_NOTIFY=off)';
     if (this.webhook) return 'not delivered: no TRIAGE_WEBHOOK_URL or SLACK_WEBHOOK_URL (TRIAGE_SLACK=webhook)';
     return 'not delivered: slack not configured';
   }
@@ -214,13 +216,15 @@ export class SlackDelivery {
     this.act = act;
     if (!this.enabled) {
       if (this.mode === 'off') this.log('slack: off (TRIAGE_SLACK=off) — interrupts are logged, not sent');
+      else if (this.webhook && this.notify === 'off') this.log('notify: off (TRIAGE_NOTIFY=off) — interrupts are logged, not sent');
       else if (this.webhook) this.log('slack: TRIAGE_SLACK=webhook but no TRIAGE_WEBHOOK_URL — interrupts are logged, not sent');
       else this.log('slack: not configured (SLACK_BOT_TOKEN and SLACK_USER_ID) — interrupts are logged, not sent');
     } else if (!this.client) {
       if (this.webhook) {
         // One URL and no handshake: there is nothing to connect to and
         // nothing to fail at boot, which is most of the point.
-        this.client = webhookClient(this.webhookUrl);
+        // Discord answers before the message is saved unless asked to wait.
+        this.client = webhookClient(this.webhookUrl, { confirm: this.notify === 'discord' });
         this.log(`notify: ${this.notify} webhook -> ${this.client.host} — one message per interrupt to the channel it was created for; no buttons, no redraw, no Home tab (TRIAGE_NOTIFY=${this.notify})`);
       } else if (this.appToken) {
         const { App } = await import('@slack/bolt');

@@ -86,8 +86,12 @@ const KNOWN_REASONS = new Set(['invalid_payload', 'user_not_found', 'channel_is_
 /** One webhook URL, and one `post(payload)`. Answers `{ ok, id: null }`:
  *  no endpoint here returns a message id, which is what keeps
  *  `deliveries.message_ts` empty in this mode and why nothing can be
- *  updated later. */
-export function webhookClient(url, { fetch = globalThis.fetch, timeoutMs = TIMEOUT_MS, name = 'TRIAGE_WEBHOOK_URL' } = {}) {
+ *  updated later. A redirect is an error, never followed: fetch would
+ *  carry the body — private work — to wherever a 307 pointed, http
+ *  included. `confirm` asks the endpoint to answer only once the message
+ *  is saved (Discord's `wait=true`; by default it answers before it is,
+ *  and a lost message would read as sent). */
+export function webhookClient(url, { fetch = globalThis.fetch, timeoutMs = TIMEOUT_MS, name = 'TRIAGE_WEBHOOK_URL', confirm = false } = {}) {
   if (!url) throw new Error('webhookClient: no URL');
   let parsed;
   try { parsed = new URL(url); } catch { throw new Error(`${name} is not a URL (host only, never the path, is ever logged)`); }
@@ -95,10 +99,12 @@ export function webhookClient(url, { fetch = globalThis.fetch, timeoutMs = TIMEO
   if (parsed.protocol === 'http:' && !isLoopback(url)) {
     throw new Error(`${name} must be https for ${parsed.hostname} — plain http is only for a local listener on 127.0.0.1, because the URL is the credential and the payload is the contents of private work`);
   }
+  const target = new URL(url);
+  if (confirm) target.searchParams.set('wait', 'true');
   return {
     host: parsed.host,
     async post(payload) {
-      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(target.toString(), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
       const body = (await res.text().catch(() => '')).trim();
       if (!res.ok) {
         const reason = KNOWN_REASONS.has(body) ? body : `${body.length} bytes not recognised as a known reason`;
