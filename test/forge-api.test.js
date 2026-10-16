@@ -49,6 +49,23 @@ test('the token goes only where the base does: another origin gets the request b
   assert.equal(r.calls[3].headers['PRIVATE-TOKEN'], undefined);
 });
 
+test('a redirect is followed only on the origin, and never with the token off it', async () => {
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push({ url, auth: init.headers.authorization, redirect: init.redirect });
+    if (url.endsWith('/repos/old/name')) return { status: 301, headers: new Headers({ location: 'https://api.github.com/repos/new/name' }), text: async () => '' };
+    if (url.endsWith('/repos/away')) return { status: 302, headers: new Headers({ location: 'https://evil.example.com/repos/away' }), text: async () => '' };
+    if (url.endsWith('/repos/loop')) return { status: 307, headers: new Headers({ location: '/repos/loop' }), text: async () => '' };
+    return { status: 200, headers: new Headers(), text: async () => '{"ok":true}' };
+  };
+  const api = new GitHubApi({ token: 'tok', tokensDir: '/nonexistent', fetch });
+  assert.deepEqual((await api.get('/repos/old/name')).body, { ok: true }, 'a renamed repository is followed');
+  assert.deepEqual(calls.map((c) => [c.url, c.auth, c.redirect]), [['https://api.github.com/repos/old/name', 'Bearer tok', 'manual'], ['https://api.github.com/repos/new/name', 'Bearer tok', 'manual']]);
+  await assert.rejects(api.get('/repos/away'), /302 on GET .*redirected off https:\/\/api\.github\.com, not followed/);
+  assert.equal(calls.length, 3, 'the off-origin hop is never fetched');
+  await assert.rejects(api.get('/repos/loop'), /more than 3 redirects/);
+});
+
 test('GitHub: a per-owner token is a file, or a gh config directory asked through gh', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-tokens-'));
   fs.writeFileSync(path.join(dir, 'acme'), '# the owner\nghp_acme\n');
