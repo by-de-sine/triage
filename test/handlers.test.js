@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../lib/store.js';
 import { createActor } from '../lib/actions.js';
+import githubSource from '../sources/github.js';
 import { SlackDelivery } from '../deliver/slack.js';
 import { registerHandlers } from '../deliver/handlers.js';
 import { parseAction, p0Message, listBlocks, when } from '../deliver/blocks.js';
@@ -43,7 +44,7 @@ function setup() {
   const client = fakeClient();
   const github = { calls: [], request: async (m, u) => { github.calls.push(u); return { status: 205 }; } };
   const d = new SlackDelivery(store, { userId: U, user: ME, client, tz: 'UTC', now: () => NOW });
-  const act = createActor({ store, github, deliver: d, now: () => NOW });
+  const act = createActor({ store, marks: { github: (item) => githubSource.mark(item, { api: github }) }, deliver: d, now: () => NOW });
   d.act = act;
   const app = fakeApp();
   d.registerHandlers(app);

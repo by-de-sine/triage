@@ -145,7 +145,7 @@ import { Store } from '../lib/store.js';
 import { Runner } from '../lib/runner.js';
 import { Ranker } from '../lib/rank.js';
 import { createActor } from '../lib/actions.js';
-import rules from '../rules/github.js';
+import rules from '../rules/thread.js';
 import { openList } from './fake-github.js';
 
 const T0 = new Date('2026-09-02T03:00:00Z');
@@ -285,7 +285,7 @@ test('through the runner: the state rules tier the open set, and a closed issue 
   assert.deepEqual(r.reconciled.reopened, ['o/r#40']);
   assert.equal(store.item(mine.id).state, 'open');
   // your own Done stands while the issue is still open on GitHub.
-  const act2 = createActor({ store, now: () => T0 });
+  const act2 = createActor({ store, marks: { github: (item) => github.mark(item, { api: null }) }, now: () => T0 });
   const done = await act2({ id: agent.id, action: 'done', by: 'web' });
   assert.match(done.external || done.note || JSON.stringify(done), /not marked read: no thread id/, 'no inbox thread behind it, and it says so');
   tick(5); r = await runner.run('github');

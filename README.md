@@ -1,8 +1,9 @@
 # triage
 
-Your queue, tiered. GitHub notifications and your calendar (mail later)
-become items in one SQLite store; rules assign each a tier and log why;
-the urgent ones reach you in Slack within a minute of landing.
+Your queue, tiered. GitHub notifications, GitLab todos and merge
+requests, and your calendar (mail later) become items in one SQLite
+store; rules assign each a tier and log why; the urgent ones reach you in
+Slack within a minute of landing.
 
 Milestone **M0 · see it** polled, stored, scored and tiered everything and
 delivered only P0, as one DM with an Open button. Milestone **M1 · act on
@@ -137,11 +138,32 @@ nothing was read; the page prints when every source last read
 successfully. Done on a CRM item is local — there is no `marks` entry and
 the key could not write one.
 
+**GitLab** (2026-10-15; plan §16, G1) is the sixth source and the first
+that is another *forge*: your pending todos as the inbox, the merge
+requests and issues that are yours updated since the last poll (GitLab's
+todos do not fire for an ordinary comment on your own merge request), and
+the open issues of `TRIAGE_GITLAB_ISSUES` as state, reconciled exactly as
+GitHub's are. A reply on GitLab is the same observation as a reply on
+GitHub, so there is **one thread-shaped rule set** for both
+(`rules/thread.js`), one interrupt set, and one client shape
+(`lib/forge-api.js`: `GitHubApi` and `GitLabApi` over one `RestApi`, either
+pointed at a self-hosted instance by `TRIAGE_GITHUB_URL` /
+`TRIAGE_GITLAB_URL`). What it asked of the seam was two declarations every
+source may now make: **`whoami(ctx)`** — who you are on this source,
+resolved once at boot, so `me` in a rule is your GitLab username on a
+GitLab item and your GitHub login on a GitHub one — and **`mark(item,
+ctx)`** — what Done does at the far end, which is the `marks` map
+`server.js` has always built, with the entry now supplied by the source.
+Done on a GitLab item marks the todo done. Nothing in `lib/` or
+`deliver/` learned the word gitlab. It ships off: `GITLAB_TOKEN` unset (and
+nothing from `glab auth token`) means the source does not register.
+
 ## The shape
 
 ```
 sources/            rules/             deliver/                     act/
   github  ─┐                                    ┌─ slack (the interrupt set: one message per verdict that interrupts)
+  gitlab   ┤                                    │
   calendar ┤                                    │
   ledger   ┼─▶ items · events (sqlite) ─▶ tier ─┤
   ha       ┤        ▲   ▲                       └─ the list: /triage · Home tab · GET / · GET /api/lists (everything else)
@@ -153,10 +175,13 @@ sources/            rules/             deliver/                     act/
 One process, one SQLite file, four seams:
 
 - **Source** — `sources/<name>.js`: `{ name, every, describe, poll(ctx),
-  due?(ctx), reconcile?(ctx), describeCursor?(state) }`. `poll` gets the cursor it returned
+  due?(ctx), reconcile?(ctx), describeCursor?(state), time?(item, { rules }),
+  project?(item), whoami?(ctx), mark?(item, ctx) }`. `poll` gets the cursor it returned
   last time and hands back `{ batches: [{item, events}], cursor, every?,
   status? }`. It owns its cursor and never writes; the runner stores what it
-  returns. GitHub honours `Last-Modified` (a 304 is free) and
+  returns. `whoami` says who you are on this source, once at boot; `mark`
+  is what Done does at the far end, and a source without one is read-only
+  there. GitHub honours `Last-Modified` (a 304 is free) and
   `X-Poll-Interval` (the API says how often), and for each thread that moved
   fetches the subject and, for issues and PRs, the comments, review comments
   and reviews since the cursor last saw it. Calendar reads `events.list`
@@ -176,6 +201,20 @@ One process, one SQLite file, four seams:
   emits nothing. The inbox writes the same fields for an issue the set
   governs, and keeps the thread id it alone knows, so Done still marks
   the thread read.
+
+  **The GitLab source is the same shape on the other forge**: `GET
+  /todos?state=pending` is the inbox (a mention, a review or approval
+  request, an assignment, a failed pipeline — each names its target and
+  why); the merge requests you authored, review or are assigned to and
+  the issues assigned to or filed by you, updated since the cursor, fill
+  in what todos never say (an ordinary comment on your own merge request);
+  and the open issues of `TRIAGE_GITLAB_ISSUES` are the state half. For each
+  thread that moved the discussions are read and become the same events
+  the GitHub source emits — a note is a `comment` (a `review_comment` when
+  it is on the diff, carrying the id of the note it answers), and the
+  system notes GitLab writes for an approval, a review request, a merge or
+  a close become `review`, `review_request` and `state`. Events are keyed
+  (`gitlab:note:<id>`, `gitlab:todo:<id>`) so a restart re-emits nothing.
 
   **`due` is the clock's half of a source**, and it is why "starts in 15
   minutes" is reliable rather than lucky: nothing changed at Google, only
@@ -215,11 +254,12 @@ One process, one SQLite file, four seams:
   local files, no API, no credential — and identifies a row by its Item text,
   so bumping a nudge date keeps the item and rewording the item makes a
   new one; the event key hashes the whole row, so any change re-tiers it.
-- **Item** — one per GitHub thread, calendar event, ledger row or to-do
-  item: `source`,
+- **Item** — one per GitHub thread, GitLab thread, calendar event, ledger
+  row or to-do item: `source`,
   `key` (`owner/repo#n` — whichever mode found it, so an issue is one
-  item however many ways it arrives — the event id, `row:<hash of the
-  item text>`, or `ha:<list>:<uid>`),
+  item however many ways it arrives — `group/project!n` for a merge
+  request and `group/project#n` for a GitLab issue, the event id,
+  `row:<hash of the item text>`, or `ha:<list>:<uid>`),
   `kind` (`pull` · `issue` · `event` · `todo` · …), `title`, `url` (null
   for a ledger row), `repo` (null for an event or a row), `actors`,
   `my_role` (authored · commented · mentioned · review_requested · assigned
@@ -234,9 +274,11 @@ One process, one SQLite file, four seams:
   `reason` and `thread_id` when it has been through the inbox, and
   `mode: 'open'` when the open set governs it. Every item carries a
   `user`.
-- **Rule** — `rules/<source>.js`: pure, named, ordered; every match is
-  returned (M5), and the strongest is the `rule`, `tier` and `reason` on the
-  decision row.
+- **Rule** — `rules/<source>.js`, or one file for a shape several sources
+  share: `rules/thread.js` serves both forges, because a reply on GitLab
+  is the same observation as a reply on GitHub. Pure, named, ordered;
+  every match is returned (M5), and the strongest is the `rule`, `tier`
+  and `reason` on the decision row.
   `match(item, fresh, { me, history, now })` returns a reason or null. Every
   verdict is a row in `decisions` with the rule's name, P3 included.
 - **Delivery** — `deliver/slack.js`, through one of two clients that
@@ -281,7 +323,7 @@ holds and `decisions` stays a record of what the rules observed.
 
 | Action | What it does |
 |---|---|
-| **Done** | `state = done`, plus whatever the item's *source* does about that — a `marks` entry keyed by source name, not a branch in `act()`. GitHub's marks the thread read (`PATCH /notifications/threads/:id`, the id the notification carried); if GitHub refuses — no thread id, a token without the scope, an outage — the local state still changes and the reason is logged and kept on the action row. **The calendar's marks nothing: triage holds a read-only scope and never writes to Google**, so Done is local and the answer says `nothing marked on Google — triage only reads your calendar`. Declining an invitation still happens in Google, and the next poll notices. **Home Assistant's marks writes**: `todo.update_item` with `status: completed` on that item's own list, so ticking a chore off here ticks it off on the kitchen screen; if Home Assistant refuses or cannot be reached, the local state still changes and the reason is on the action row. It is the only write this process makes outside its own store. Reopens on a new P0–P2: you handled it; now there is more. |
+| **Done** | `state = done`, plus whatever the item's *source* does about that — a `marks` entry keyed by source name, not a branch in `act()`, supplied by the source's own `mark` where it has one. GitHub's marks the thread read (`PATCH /notifications/threads/:id`, the id the notification carried); **GitLab's marks the todo done** (`POST /todos/:id/mark_as_done`, the todo that brought the item — a thread that arrived without one says `no todo on the item`); if the forge refuses — no thread id, a token without the scope, an outage — the local state still changes and the reason is logged and kept on the action row. **The calendar's marks nothing: triage holds a read-only scope and never writes to Google**, so Done is local and the answer says `nothing marked on Google — triage only reads your calendar`. Declining an invitation still happens in Google, and the next poll notices. **Home Assistant's marks writes**: `todo.update_item` with `status: completed` on that item's own list, so ticking a chore off here ticks it off on the kitchen screen; if Home Assistant refuses or cannot be reached, the local state still changes and the reason is on the action row. It is the only write this process makes outside its own store. Reopens on a new P0–P2: you handled it; now there is more. |
 | **Snooze** | `state = snoozed until`; the first poll past the time wakes it, sets it open again and writes a `snooze_wake` decision — a P0 is sent at once (its age is no bar, you asked for it); anything else is back in the list at a fresh rank, and the row says so. Buttons offer 1 h and 1 d; the API takes any ISO time or `30m` / `1h` / `1d`. New activity while snoozed does not wake it. |
 | **Later** | `state = later`; the score is divided by ten thousand, so the item sinks beneath every open item of every tier and has no date. Re-tiered on new activity but stays sunk; only a new P0 lifts it. |
 | **Mute thread** | `state = muted`; still tiered and logged on every poll, never delivered, never reopened. |
@@ -392,7 +434,7 @@ because under a ranking the tier no longer picks a channel.
 
 | Source | Rules that may fire Slack, out of the box |
 |---|---|
-| `github` | `reply_to_my_review_comment` · `reply_to_my_comment` · `direct_mention` · `review_requested` · `new_pull_request` |
+| `github` · `gitlab` | `reply_to_my_review_comment` · `reply_to_my_comment` · `direct_mention` · `review_requested` · `new_pull_request` |
 | `calendar` | `starts_in_15_min` · `new_invitation` |
 | `crm` | `handed_to_me` · `changed_on_my_task` · `crm_unread` |
 
@@ -468,9 +510,9 @@ trick applied to delivery instead of to rules.
 Each source has its own ordered rules, and the tier means the same thing in
 both: P0 is a thing to do now.
 
-| Tier | Meaning | Rules (GitHub, in order) |
+| Tier | Meaning | Thread rules (GitHub and GitLab, in order) |
 |---|---|---|
-| **P0** | someone is waiting on you | `reply_to_my_review_comment` (a human reply whose `in_reply_to_id` is yours) · `reply_to_my_comment` (a human comment on a thread you commented in, newer than your last) · `direct_mention` · `review_requested` (by a person) · `new_pull_request` (a person opened a pull request in a repository you follow, within the last day — they want feedback whether or not they named you) |
+| **P0** | someone is waiting on you | `reply_to_my_review_comment` (a human reply whose `in_reply_to_id` is yours — on GitLab, a reply in a discussion you opened on the diff) · `reply_to_my_comment` (a human comment on a thread you commented in, newer than your last) · `direct_mention` · `review_requested` (by a person) · `new_pull_request` (a person opened a pull or merge request in a repository you follow, within the last day — they want feedback whether or not they named you) |
 | **P1** | yours, moving | `comment_on_my_thread` · `review_on_my_pr` |
 | **P2** | worth knowing today | `state_change_on_mine` (merged, closed) · `assigned` (the notification) · `issue_assigned_to_me` (an open issue with you on it — a fact about the item, from either mode; claim 0.5) · `my_open_issue` (you filed it and it is still open; claim 0.35 — this is what an agent-filed issue is, since agents here act as you) · `new_issue` (a human opened one in a repo you follow; was `new_issue_on_my_repo`, whose owner condition excluded every repo you actually file in) |
 | **P3** | ambient | `release` · `own_activity` · `bot_only` · `ambient` |
@@ -489,8 +531,9 @@ news for a brief of the day's meetings, but the alarm exists so you do not
 miss what is starting, and Google cannot tell a focus block from a dentist
 appointment. Of the two errors, silence is the worse one.
 
-Bots (`[bot]`, coderabbit, dependabot, …) are never "someone": a review
-bot answering your comment is P3.
+Bots (`[bot]`, coderabbit, dependabot, GitLab's `project_N_bot` access
+tokens, `ghost`, …) are never "someone": a review bot answering your
+comment is P3.
 
 | Tier | Meaning | Rules (ledger, in order) |
 |---|---|---|
@@ -564,21 +607,24 @@ second opinion (plan §13.4 item 3 accepts that). "CI failed on your PR"
 notifications API does not carry, so it is a source change rather than a
 rule.
 
-`bin/replay.js owner/repo#n` runs the rules over one thread's real history
-step by step and prints what each would have decided — how "would that
-reply have been P0?" is answered without waiting for the next one. It
-reads GitHub and writes nothing.
+`bin/replay.js owner/repo#n` (or `group/project!n` on GitLab) runs the
+rules over one thread's real history step by step and prints what each
+would have decided — how "would that reply have been P0?" is answered
+without waiting for the next one. It reads the forge and writes nothing.
 
 ## Run it
 
-Node ≥ 24 (`node:sqlite` is built in). `npm ci` for `@slack/bolt`, the
-one dependency; the Calendar API is stdlib `fetch` and no dependency at all.
+Node ≥ 24 (`node:sqlite` and `fetch` are built in). The two npm packages,
+`@slack/bolt` and `@slack/web-api`, are reached only under
+`TRIAGE_SLACK=app`, so `npm ci` is for the app path: the tests and a
+server on the webhook boot with no `node_modules` at all. GitHub, GitLab,
+Google and Twenty are stdlib `fetch` and no dependency.
 
 ```bash
-npm test                       # node --test, in-memory store, fake GitHub, Slack, calendar, Home Assistant and Twenty
+npm test                       # node --test, in-memory store, fake GitHub, GitLab, Slack, calendar, Home Assistant and Twenty
 node server.js                 # 127.0.0.1:3300 — the page is at /
 node bin/google-consent.js     # once, by hand: the Google consent that mints the refresh token
-node bin/replay.js o/r#123     # what the rules would have said, step by step
+node bin/replay.js o/r#123     # what the rules would have said, step by step (group/project!12 on GitLab)
 curl -X POST localhost:3300/api/items/12/act -H 'content-type: application/json' -d '{"action":"snooze","until":"1h"}'
 ```
 
@@ -588,8 +634,15 @@ read from the repo.
 
 | Variable | Default | |
 |---|---|---|
-| `GITHUB_TOKEN` | what `gh auth token` holds | a **classic** token with `notifications` (or `repo`): GitHub's notifications endpoints — the inbox and marking a thread read — do not accept fine-grained tokens. A per-owner token in `<TRIAGE_TOKENS_DIR>/<owner>` (`~/.config/triage/tokens` by default) is used for that owner's repos when present, and those can be fine-grained |
-| `GITHUB_USER` | `GET /user` | the login the items belong to |
+| `GITHUB_TOKEN` | what `gh auth token` holds | a **classic** token with `notifications` (or `repo`): GitHub's notifications endpoints — the inbox and marking a thread read — do not accept fine-grained tokens. A per-owner token in `<TRIAGE_TOKENS_DIR>/<owner>` (`~/.config/triage/tokens` by default) is used for that owner's repos when present, and those can be fine-grained; the entry is a file holding the token, or a directory holding a `gh` config (`hosts.yml`), in which case `gh auth token` is asked with `GH_CONFIG_DIR` pointed there, once every ten minutes |
+| `GITHUB_USER` | `GET /user` | who you are on GitHub — the `me` every thread rule compares an actor to on a GitHub item, and, when GitHub is on, the `user` every item is filed under |
+| `TRIAGE_GITHUB` | unset | `on` · `off`. Unset means **on if a token resolves**; `on` refuses to start without one; `off` never registers the source. A mode it does not recognise is refused at boot |
+| `TRIAGE_GITHUB_URL` | `https://api.github.com` | a GitHub Enterprise API base, `https://host/api/v3`; the web links pair with it |
+| `GITLAB_TOKEN` | what `glab auth token` holds | a personal access token with `read_api`, and `api` if Done is to mark the todo done. A box without `glab` reads as no token, and the source stays off |
+| `GITLAB_USER` | `GET /user` | who you are on GitLab — the `me` on a GitLab item, and the `user` every item is filed under when GitHub is off. Switching which forge is first on an existing store changes that `user` and leaves the old rows filed under the old name |
+| `TRIAGE_GITLAB` | unset | `on` · `off`, exactly as `TRIAGE_GITHUB` |
+| `TRIAGE_GITLAB_URL` | `https://gitlab.com` | the instance; the API is `/api/v4` under it |
+| `TRIAGE_GITLAB_ISSUES` | — | projects whose **open issues** are read as state and reconciled, `group/project` comma-separated (a path may nest; a URL is accepted; a bad entry is refused at boot) |
 | `TRIAGE_SLACK` | unset | `webhook` · `app` · `off`. Unset means **infer from what is configured** — `webhook` if `SLACK_WEBHOOK_URL` is set, `app` if `SLACK_BOT_TOKEN` is, `off` otherwise; with both set the webhook wins and `app` says otherwise. A mode it does not recognise is refused at boot, as `TRIAGE_CALENDAR` is: a typo must not read as the default |
 | `SLACK_WEBHOOK_URL` | — | an incoming webhook (plan §11.6). One message per interrupt to the channel it was created for; no DM, no buttons, no redraw, no Home tab. **Point it at a channel you are alone in** — a DM to `SLACK_USER_ID` was private by construction and this is not, and what goes through it is a thread title, a repo name and a line of a comment, from private repositories. Nothing in the code can check where a webhook points. The URL *is* the credential: it carries no scopes, cannot be narrowed, and is never logged, stored or returned by the API — only its host is. Must be `https`, except on loopback — plain `http://127.0.0.1:…` is allowed because that is how a worktree proves delivery against a listener of its own. A post is abandoned after ten seconds and never retried: `deliver()` is awaited by the poll, and an ambiguous POST may well have arrived |
 | `SLACK_BOT_TOKEN` · `SLACK_APP_TOKEN` · `SLACK_USER_ID` | — | the `app` path, superseded by the webhook but not deleted, and **read by nothing else**: the webhook path's mention is `TRIAGE_MENTION`, so these three stay app-only and a box on the webhook leaves all of them unset. Without the first and last, delivery is off and every interrupt is logged as not delivered; without the app token there is no Socket Mode, so DMs go out but no button, `/triage` or Home tab answers |
@@ -600,8 +653,8 @@ read from the repo.
 | `TRIAGE_PORT` · `TRIAGE_HOST` | `3300` · `127.0.0.1` | |
 | `TRIAGE_DB` | `~/.local/state/triage/triage.db` | data, not config |
 | `TRIAGE_GITHUB_ALL` | unset | `1` reads threads you have marked read too |
-| `TRIAGE_ISSUES` | — | repositories whose **open issues** are read as state and reconciled, `owner/name` comma-separated (a GitHub URL is accepted; a bad entry is refused at boot). Unset, the source is the inbox alone. A list and not an inference: "repos I work in" is not a question GitHub answers (plan §12.7) |
-| `TRIAGE_ISSUES_EVERY_MIN` | `5` | how often the open set is read whole — one list call per repository per hundred issues. `0` reads it on every poll. Between reads the last set stands, and nothing is resolved against a set the read could not complete |
+| `TRIAGE_GITHUB_ISSUES` | — | repositories whose **open issues** are read as state and reconciled, `owner/name` comma-separated (a GitHub URL is accepted; a bad entry is refused at boot). Unset, the source is the inbox alone. A list and not an inference: "repos I work in" is not a question GitHub answers (plan §12.7). **`TRIAGE_ISSUES` is read as an alias** — the name it had before there were two forges — so a `.env` written then goes on meaning it |
+| `TRIAGE_ISSUES_EVERY_MIN` | `5` | how often each open set is read whole — one list call per repository per hundred issues. `0` reads it on every poll. Between reads the last set stands, and nothing is resolved against a set the read could not complete |
 | `TRIAGE_LEDGER` | unset | a path names the markdown queue file, whose `status/` sibling is the handoffs directory, and refuses to start if it is missing; unset or `off` never registers the source. The read is local and read-only — a worktree can point at the real file; its own store is the only thing reconcile touches |
 | `TRIAGE_CALENDAR` | unset | unset means **on if the credentials are there**, off otherwise — a Google project is ring-0 work and a box without one should run the rest of triage rather than fail a poll a minute. `google` refuses to start without them; `off` never registers the source; `fake` runs the canned calendar from `test/`, for a worktree with no project — every title says `(fake)` |
 | `GOOGLE_CLIENT_FILE` | `google-oauth.json` beside the `.env` | the OAuth **desktop client** downloaded from the Google Cloud console (`{"installed": {…}}`). `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` in the environment override it |
@@ -649,9 +702,10 @@ box's own configuration.
 - It is **one Node process**, started from `<checkout>/server.js`. There is
   nothing else to start, nothing to build, and no artifact.
 - A deploy is: **the checkout at the new commit, `npm ci` if and only if
-  `package-lock.json` changed, a restart.** The lock file matters — there is
-  a dependency (`@slack/bolt`), so a pulled `main` on a stale `node_modules`
-  starts and then fails at the first import.
+  `package-lock.json` changed, a restart.** The lock file matters — there
+  are two packages (`@slack/bolt`, `@slack/web-api`), reached only under
+  `TRIAGE_SLACK=app`, so a pulled `main` on a stale `node_modules` starts
+  and then fails at the first import on that path.
 - **The store migrates itself at boot**, idempotently (§The store), and drops
   nothing without a dated note in `docs/plan.md`. Nothing rolls a migration
   back, so a **consistent snapshot before every restart** is the whole
@@ -691,7 +745,7 @@ Bound to 127.0.0.1; JSON.
 | `GET /api/sources` | registered sources, their cursors and health. A cursor is shown the way its own source describes it — GitHub's conditional stamp and thread count and, with `TRIAGE_ISSUES`, `issues: { repos, open, complete, read_at }` for the open set; the calendar's `synced_at` and how many events are waiting to enter the window. Never the sync token itself |
 | `POST /api/sources/:name/run` | poll now; answers with what was stored and decided |
 | `GET /api/decisions` | `?tier=&rule=&by=&item=&since=&delivered=&limit=` — every verdict with its rule and what delivery said: `sent`, `updated … (coalesced)`, `held`, or why not — `not delivered: <rule> does not interrupt (<the statement that said so — the default set, a `TRIAGE_PREFS` project, `TRIAGE_INTERRUPT`>); it is in the list` for everything the interrupt set does not name. Each row carries `by` (`rule`, or `wake` for the row a snooze that ended wrote) |
-| `GET /healthz` | `ok`, when it started, `commit` (what the deploy said is running, or null — §Deploy), the item and decision counts, which sources are failing, when each last read successfully (`read`), and what Slack would do |
+| `GET /healthz` | `ok`, when it started, `commit` (what the deploy said is running, or null — §Deploy), `user` and `identity` (who you are, per source), the item and decision counts, which sources are failing, when each last read successfully (`read`), and what Slack would do |
 
 ## The reports
 

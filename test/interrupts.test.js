@@ -8,7 +8,7 @@ import { Store } from '../lib/store.js';
 import { SlackDelivery } from '../deliver/slack.js';
 import { INTERRUPTS, parseInterrupts, interrupts } from '../deliver/interrupts.js';
 import { ingest } from '../lib/pipeline.js';
-import githubRules from '../rules/github.js';
+import githubRules from '../rules/thread.js';
 import calendarRules from '../rules/calendar.js';
 
 const ME = 'alice';
@@ -17,6 +17,7 @@ const NOW = new Date('2026-09-10T12:00:00Z');
 test("the set is the owner's answer: today's P0s plus new_invitation", () => {
   assert.deepEqual(INTERRUPTS, {
     github: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'],
+    gitlab: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'],
     calendar: ['starts_in_15_min', 'new_invitation'],
     crm: ['handed_to_me', 'changed_on_my_task', 'crm_unread'],
   });
@@ -214,7 +215,7 @@ test("a source's own list in the file replaces only that source", () => {
   assert.equal(r.allows('github', 'direct_mention').allow, true);
   assert.equal(r.allows('github', 'reply_to_my_comment').allow, false);
   assert.equal(r.allows('calendar', 'starts_in_15_min').allow, true, 'the calendar was not mentioned and must not be swept');
-  assert.deepEqual(r.set, { github: ['direct_mention'], calendar: ['starts_in_15_min', 'new_invitation'], crm: ['handed_to_me', 'changed_on_my_task', 'crm_unread'] });
+  assert.deepEqual(r.set, { github: ['direct_mention'], gitlab: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'], calendar: ['starts_in_15_min', 'new_invitation'], crm: ['handed_to_me', 'changed_on_my_task', 'crm_unread'] });
 });
 
 test('a wake still bypasses every layer, however hard they say no', () => {

@@ -23,14 +23,11 @@
 // A thread whose updated_at has not moved costs nothing; one that has costs
 // one subject call and, for issues and PRs, up to three list calls. The
 // open set costs one list call per repository per page, once per cadence.
-import { isBot } from '../lib/util.js';
-import { API } from '../lib/github-api.js';
+import { isBot, nextLink, sameLogin } from '../lib/util.js';
+import { threadTime, sameRepos } from '../lib/forge.js';
 
 const KINDS = { PullRequest: 'pull', Issue: 'issue', Commit: 'commit', Release: 'release', Discussion: 'discussion', CheckSuite: 'checks', RepositoryInvitation: 'invitation', SecurityAlert: 'alert' };
 const ROLE_BY_REASON = { author: 'authored', mention: 'mentioned', team_mention: 'mentioned', review_requested: 'review_requested', assign: 'assigned', comment: 'commented', state_change: 'subscribed', subscribed: 'subscribed', manual: 'subscribed', ci_activity: 'subscribed', invitation: 'subscribed', security_alert: 'subscribed' };
-/** Rules that observe *news* rather than a person waiting: nothing here
- *  gets more urgent by sitting. A thread with any other rule on it does. */
-const NEWS = new Set(['state_change_on_mine', 'release', 'own_activity', 'bot_only', 'ambient', 'new_issue']);
 const CURSOR_TTL_MS = 30 * 86_400_000;
 const MAX_PAGES = 20; // 1,000 threads; a safety cap, not a design limit
 const ISSUE_PAGES = 10; // 1,000 open issues per repository; the same kind of cap
@@ -42,8 +39,8 @@ export function itemKey(n) {
   return `${n.repository.full_name}@${String(n.subject.type).toLowerCase()}:${(n.subject.url || n.id).split('/').pop()}`;
 }
 
-function htmlUrl(n) {
-  const base = n.repository?.html_url || `https://github.com/${n.repository?.full_name}`;
+function htmlUrl(n, webBase = 'https://github.com') {
+  const base = n.repository?.html_url || `${webBase}/${n.repository?.full_name}`;
   const tail = (n.subject?.url || '').split('/').slice(-2).join('/'); // "pulls/12" or "commits/sha"
   if (!tail) return base;
   return `${base}/${tail.replace(/^pulls\//, 'pull/').replace(/^commits\//, 'commit/')}`;
@@ -67,7 +64,7 @@ export default {
    *  first curve put 34 "your pull was merged" rows at the top of the list
    *  and nothing else anywhere near it, which is a bad list even when every
    *  row in it is scored correctly (plan §11.4 item 6). */
-  time: (item, { rules = [] } = {}) => (item.kind === 'release' || (rules.length && rules.every((r) => NEWS.has(r))) ? 'fading' : 'waiting'),
+  time: threadTime,
 
   /** Plan §14.3: what a "project" is here, for the scoped layers of what
    *  interrupts you and of what a project is worth. A repository, which is
@@ -76,6 +73,25 @@ export default {
    *  than reading `item.repo` itself, because a source whose projects are
    *  not repositories must not have to pretend they are. */
   project: (item) => item.repo || null,
+
+  /** Who the items belong to on GitHub: `GITHUB_USER`, else `GET /user`,
+   *  resolved once at boot (server.js) and handed to every rule as `me`. */
+  async whoami({ api, user = null }) { return user || (await api.get('/user')).body.login; },
+
+  /** What Done does on GitHub: the thread is marked read, so the two
+   *  inboxes agree. A mark that fails — no thread id, a token without the
+   *  scope, GitHub down — is a sentence on the action row, never a thrown
+   *  error: the local state changes either way (lib/actions.js). */
+  async mark(item, { api }) {
+    const id = item.data?.thread_id;
+    if (!id) return 'not marked read: no thread id on the item';
+    if (!api) return 'not marked read: no GitHub client';
+    try { await api.request('PATCH', `/notifications/threads/${id}`); return 'marked read'; }
+    catch (e) {
+      const why = e.status === 403 || e.status === 404 ? `${e.message} — the token needs the notifications scope (a classic token's repo scope carries it)` : e.message;
+      return `not marked read: ${why}`;
+    }
+  },
 
   /** Two halves, the state half first so the feed half knows which issues
    *  the open set governs.
@@ -127,8 +143,6 @@ export default {
   },
 };
 
-function nextLink(link) { const m = /<([^>]+)>;\s*rel="next"/.exec(link || ''); return m ? m[1] : null; }
-const sameRepos = (a, b) => JSON.stringify((a || []).map(lower).sort()) === JSON.stringify((b || []).map(lower).sort());
 
 /** The feed half: the inbox, as it always was. `governed` is the open set
  *  the state half just read, so an issue the inbox brings that is in it
@@ -192,7 +206,7 @@ async function openIssues({ api, prev, repos, everyMs, me, now, log }) {
   for (const repo of repos) {
     if (api.rate.remaining != null && api.rate.remaining < 50) { complete = false; error = error || `rate limit low (${api.rate.remaining}); ${repo} not read`; log(error); continue; }
     try {
-      const { list, whole } = await listOpen(api, repo);
+      const { list, whole } = await api.listPages(`/repos/${repo}/issues`, { pages: ISSUE_PAGES, params: { state: 'open', sort: 'updated', direction: 'asc' } });
       if (!whole) { complete = false; error = error || `${repo} has more than ${ISSUE_PAGES * 100} open issues; read the first ${list.length}`; log(error); }
       for (const s of list) {
         if (s.pull_request) continue;   // the issues endpoint lists pull requests too
@@ -214,22 +228,6 @@ async function openIssues({ api, prev, repos, everyMs, me, now, log }) {
   };
 }
 
-/** Every page of a repository's open issues, up to the cap; `whole` says
- *  whether the cap was hit. Oldest-updated first, so a capped read keeps
- *  the ones that have waited longest. */
-async function listOpen(api, repo) {
-  const u = new URL(`${API}/repos/${repo}/issues`);
-  u.searchParams.set('state', 'open'); u.searchParams.set('sort', 'updated'); u.searchParams.set('direction', 'asc'); u.searchParams.set('per_page', '100');
-  let next = u.toString();
-  const list = [];
-  for (let i = 0; next && i < ISSUE_PAGES; i++) {
-    const r = await api.get(next);
-    if (Array.isArray(r.body)) list.push(...r.body);
-    next = nextLink(r.headers.get('link'));
-  }
-  return { list, whole: !next };
-}
-
 /** One open issue, as the state mode writes it: the item carries what the
  *  state rules read (`assignees`, `author`, `state`) and the mode; the
  *  events are `opened` on first sight (the same key the inbox would use, so
@@ -245,7 +243,7 @@ function openIssue(configured, s, me, { thread_id, first, nowIso }) {
   const assignees = (s.assignees || []).map((u) => u.login).filter(Boolean);
   const data = issueData(s, { mode: 'open', ...(thread_id ? { thread_id } : {}) });
   const item = { source: 'github', key, kind: 'issue', title: s.title, url: s.html_url, repo, actors: [...new Set([author, ...assignees].filter(Boolean))],
-    my_role: lower(author) === lower(me) ? 'authored' : assignees.some((a) => lower(a) === lower(me)) ? 'assigned' : null, last_activity: s.updated_at, last_seen: nowIso, data };
+    my_role: sameLogin(author, me) ? 'authored' : assignees.some((a) => sameLogin(a, me)) ? 'assigned' : null, last_activity: s.updated_at, last_seen: nowIso, data };
   const events = [];
   if (first) events.push({ key: `github:opened:${key}`, ts: s.created_at, kind: 'opened', actor: author, body: s.body || '', url: s.html_url, data: {} });
   events.push({ key: `github:open:${key}:${s.updated_at}`, ts: s.updated_at, kind: 'open', actor: null, body: null, url: s.html_url, data: { assignees, labels: data.labels, comments: s.comments ?? null } });
@@ -270,7 +268,7 @@ async function thread(api, n, known, me, governed = new Set()) {
   const key = itemKey(n);
   const since = known?.updated_at || null;
   const events = [];
-  const item = { source: 'github', key, kind, title: n.subject.title, url: htmlUrl(n), repo: n.repository.full_name, actors: [], my_role: ROLE_BY_REASON[n.reason] || 'subscribed', last_activity: n.updated_at, last_seen: n.updated_at, data: { reason: n.reason, thread_id: n.id, type: n.subject.type } };
+  const item = { source: 'github', key, kind, title: n.subject.title, url: htmlUrl(n, api.webBase), repo: n.repository.full_name, actors: [], my_role: ROLE_BY_REASON[n.reason] || 'subscribed', last_activity: n.updated_at, last_seen: n.updated_at, data: { reason: n.reason, thread_id: n.id, type: n.subject.type } };
   // The notification itself is an event: it is what the inbox knows, and it
   // is the one thing guaranteed fresh on every thread that moved.
   events.push({ key: `github:notif:${n.id}:${n.updated_at}`, ts: n.updated_at, kind: 'notification', actor: null, body: null, url: item.url, data: { reason: n.reason } });
@@ -285,12 +283,12 @@ async function thread(api, n, known, me, governed = new Set()) {
   // and the mode, when the open set governs this issue, so an inbox write
   // does not take it out from under reconcile.
   item.data = issueData(s, { reason: n.reason, thread_id: n.id, ...(kind === 'issue' && governed.has(key) ? { mode: 'open' } : {}) });
-  if (author === me) item.my_role = 'authored';
+  if (sameLogin(author, me)) item.my_role = 'authored';
   const actors = new Set(author ? [author] : []);
   if (!since) events.push({ key: `github:opened:${item.repo}#${num}`, ts: s.created_at, kind: 'opened', actor: author, body: s.body || '', url: s.html_url, data: {} });
   if (s.merged_at && (!since || s.merged_at > since)) events.push({ key: `github:merged:${item.repo}#${num}`, ts: s.merged_at, kind: 'state', actor: s.merged_by?.login || null, body: 'merged', url: s.html_url, data: { state: 'merged' } });
   else if (s.closed_at && s.state === 'closed' && (!since || s.closed_at > since)) events.push({ key: `github:closed:${item.repo}#${num}:${s.closed_at}`, ts: s.closed_at, kind: 'state', actor: null, body: 'closed', url: s.html_url, data: { state: 'closed' } });
-  if (n.reason === 'review_requested' && (s.requested_reviewers || []).some((u) => u.login === me)) {
+  if (n.reason === 'review_requested' && (s.requested_reviewers || []).some((u) => sameLogin(u.login, me))) {
     events.push({ key: `github:review_request:${item.repo}#${num}:${n.updated_at}`, ts: n.updated_at, kind: 'review_request', actor: author, body: null, url: s.html_url, data: { by_bot: isBot(author) } });
   }
   const repoPath = `/repos/${item.repo}`;

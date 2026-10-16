@@ -6,7 +6,7 @@ import { Runner } from '../lib/runner.js';
 import { createApp } from '../lib/api.js';
 import { SlackDelivery } from '../deliver/slack.js';
 import github from '../sources/github.js';
-import rules from '../rules/github.js';
+import rules from '../rules/thread.js';
 import { fakeApi, notification, pull, comment } from './fake-github.js';
 import { createActor } from '../lib/actions.js';
 import { Ranker } from '../lib/rank.js';
@@ -22,7 +22,7 @@ async function boot() {
   });
   const deliver = new SlackDelivery(store, {});
   const patches = [];
-  const act = createActor({ store, github: { request: async (m, u) => { patches.push(`${m} ${u}`); return { status: 205 }; } }, deliver });
+  const act = createActor({ store, marks: { github: (item) => github.mark(item, { api: { request: async (m, u) => { patches.push(`${m} ${u}`); return { status: 205 }; } } }) }, deliver });
   const rank = new Ranker({ shapes: { github: github.time } });
   const runner = new Runner(store, [github], { user: ME, rules: { github: rules }, deliver, rank, extras: { github: { api } } });
   const server = http.createServer(createApp({ store, runner, deliver, act, rank, rules: { github: rules }, user: ME, tz: 'America/Vancouver' }));

@@ -7,16 +7,16 @@ is not repeated here; read it first. This file is how to *work on* it.
 ## Where things are
 
 ```text
-server.js        boot: config, store, the GitHub and Google clients, Slack, the runner, the API
-sources/         one file per source: github.js, calendar.js, ledger.js, ha.js, crm.js — poll(ctx) → batches + cursor; due(ctx) for the clock's half; reconcile(ctx) for the state half (github.js and crm.js have both: GitHub's inbox is a feed and the open issues of TRIAGE_ISSUES are state; the CRM's open tasks are state and anybody else's edit is an event; ledger.js and ha.js are state throughout)
-rules/           one file per source: github.js, calendar.js, ledger.js, ha.js, crm.js — ordered, named, every match returned; each rule declares its `claim`
+server.js        boot: config, store, the forge clients (GitHub, GitLab — each registers when its token resolves, and says who you are there), the Google client, Slack, the runner, the API
+sources/         one file per source: github.js, gitlab.js, calendar.js, ledger.js, ha.js, crm.js — poll(ctx) → batches + cursor; due(ctx) for the clock's half; reconcile(ctx) for the state half (github.js, gitlab.js and crm.js have both: a forge's inbox is a feed and the open issues of TRIAGE_GITHUB_ISSUES / TRIAGE_GITLAB_ISSUES are state; the CRM's open tasks are state and anybody else's edit is an event; ledger.js and ha.js are state throughout); whoami(ctx) and mark(item, ctx) on the forges
+rules/           thread.js (both forges: a reply on GitLab is the same observation as one on GitHub), calendar.js, ledger.js, ha.js, crm.js — ordered, named, every match returned; each rule declares its `claim`
 deliver/         slack.js (the windows, the guards, the answer on every decision), webhook.js (TRIAGE_SLACK=webhook: one incoming webhook URL, post only), blocks.js (pure; item.kind picks the shape), handlers.js (TRIAGE_SLACK=app only: buttons, /triage, Home), interrupts.js (M5 + §14: which rules, per source, for which project, may fire Slack — four layers resolved into one statement list)
-lib/             store.js (node:sqlite), runner.js, pipeline.js, rules.js, actions.js, lists.js, api.js, config.js, github-api.js, google-api.js, ha-api.js, twenty-api.js (GraphQL, read-only), util.js, rank.js (M5: the score, which is the product), backfill.js (M5: the one bounded pass that gives the backlog a rank), aggregates.js (§13.6: the queue as counts, for a program), reports.js (§15: the queue over time — named reports over one bounded read, for the stats page and for a program)
+lib/             store.js (node:sqlite), runner.js, pipeline.js, rules.js, actions.js, lists.js, api.js, config.js, forge-api.js (one RestApi; GitHubApi with a token per owner, GitLabApi), forge.js (what the forge sources share: the news set, the time curve, the repository-list parser), google-api.js, ha-api.js, twenty-api.js (GraphQL, read-only), util.js, rank.js (M5: the score, which is the product), backfill.js (M5: the one bounded pass that gives the backlog a rank), aggregates.js (§13.6: the queue as counts, for a program), reports.js (§15: the queue over time — named reports over one bounded read, for the stats page and for a program)
 public/          the list page (index.html, app.js) and the stats page (stats.html, stats.js): static, no build, one stylesheet
-bin/replay.js    run the rules over one real thread, step by step, writing nothing
+bin/replay.js    run the rules over one real thread, on either forge, step by step, writing nothing
 bin/google-consent.js  the one browser step, run once by hand: mints the calendar's refresh token
 slack/           the app manifest
-test/            node --test; in-memory store, fake GitHub (fake-github.js), fake Slack, fake calendar (fake-calendar.js), fake Home Assistant (fake-ha.js), fake Twenty (fake-twenty.js), a temp-dir ledger (ledger.test.js)
+test/            node --test; in-memory store, fake GitHub (fake-github.js), fake GitLab (fake-gitlab.js), fake Slack, fake calendar (fake-calendar.js), fake Home Assistant (fake-ha.js), fake Twenty (fake-twenty.js), a temp-dir ledger (ledger.test.js)
 docs/plan.md     the plan: what is still intended, with dated notes for what shipped or was superseded
 .env.example     every variable, commented; preferences.example.json is the preferences file's shape
 ```
@@ -37,8 +37,10 @@ because the far end changed) and `describeCursor(state)`; delivery picks its
 shape from `item.kind`, never from `item.source`; what Done does outside
 triage is a map keyed by source name, in `server.js`, as the time curve
 is (below). Nothing in `lib/` says "calendar" and
-nothing in `lib/` says "github". If a fifth thing is needed for Gmail, that
-is the test it has to pass.
+nothing in `lib/` says "github" — true since G1 (plan §16, 2026-10-15)
+moved the GitHub mark-as-read out of `lib/actions.js` and into the
+source's own `mark`. If a fifth thing is needed for Gmail, that is the
+test it has to pass.
 
 **M5 widened the source seam once more, and the same rule applied.** A
 source may declare `time(item, { rules })` — which curve time follows for
@@ -96,6 +98,19 @@ and customised drifting into different code. And every refusal names the
 statement that made it, on the decision row and through
 `GET /api/interrupts`: a configuration nobody can interrogate is one nobody
 can adopt, which is the whole argument of §14.6.
+
+**G1 (plan §16, 2026-10-15) widened it a fifth time, for a second forge,
+and the two declarations are about identity and about writing.** A source
+may declare `whoami(ctx)` — who you are on it, resolved once at boot into
+an identity map, so `me` in a rule is the GitLab username on a GitLab item
+and the GitHub login on a GitHub one, while `items.user` stays the one
+person (the GitHub login when GitHub is on, else GitLab's) — and
+`mark(item, ctx)`, what Done does at the far end, which is the `marks` map
+`server.js` has always built with the entry now supplied by the source
+rather than written beside it. Both are maps built at boot from the
+registered sources, like `shapes` and `projects`. What proved the
+abstraction cost nothing: `rules/github.js` became `rules/thread.js` and
+the GitHub fixtures passed unchanged.
 
 If a change wants to cross a seam, that is the design
 changing, and it goes in `docs/plan.md` first.
@@ -155,10 +170,14 @@ quota (§12.5), if a source ever needs it. **§14 is the interrupt path
 becoming configurable** — the four layers, the `project(item)` seam, and
 the mention that makes a webhook's message a notification rather than a
 badge; it is not a milestone either, it is what the first real interrupt
-this system sent turned out to need. **M6 · learn it** is next and is
-structural only — revealed preference from `actions`, saturation and
-spread, hysteresis tuning (§7). Gmail moves behind it (§11.8) and is not
-started.
+this system sent turned out to need. **§16 (2026-10-15) is triage for
+strangers** — flexible on the input, opinionated on the output — and its
+G1, the forge layer and GitLab, is the first port; G2 (the webhook
+shapes), G3 (the demo) and G4 (the calendar as an ICS feed) follow in that
+order, and G5 (the Slack app surface) waits on the app. **M6 · learn it**
+is structural only — revealed preference from `actions`, saturation and
+spread, hysteresis tuning (§7) — and is not gated on them. Gmail moves
+behind M6 (§11.8) and is not started.
 
 ## Running it: one worktree, one instance
 
@@ -208,9 +227,10 @@ read-only, and the worktree's own store is the only thing reconcile
 touches. `test/ledger.test.js` writes a real queue file to a temp dir,
 which is the shape to copy for a canned one.
 
-**A worktree runs with the CRM off** until you give it the four lines —
-`TWENTY_URL`, `TWENTY_API_KEY` (a key bound to a read-only role, never
-printed), `TRIAGE_CRM_ME` and `TRIAGE_CRM_PROJECTS` — plus
+**A worktree runs with the CRM off** until you give it the three lines
+that turn it on — `TWENTY_URL`, `TWENTY_API_KEY` (a key bound to a
+read-only role, never printed) and `TRIAGE_CRM_ME` — plus
+`TRIAGE_CRM_PROJECTS` so statements can scope to a company, and
 `TRIAGE_CRM_AGENTS` if your own agents write through the API. Unlike Home
 Assistant, **pointing a worktree at the real Twenty is fine**: the key's
 role can update nothing, and the source has no write path to try. Its
@@ -222,6 +242,16 @@ does not); the live run proves the read, the counts and the unread alarm
 switching from fake to live on one store makes the live read a
 non-baseline, and every task anybody else last touched reads as news.
 Prove the live read on a store of its own.
+
+**A worktree runs with GitLab off** until `GITLAB_TOKEN` names a token (or
+`glab auth token` holds one): the source does not register and the boot
+log says so. `test/fake-gitlab.js` is the canned GitLab the suite runs
+against — Alice's todos, a merge request of hers with a reply on the diff,
+one she is asked to review, an open issue assigned to her — and
+`test/gitlab-source.test.js` proves the inbox, the discussions, Done
+marking the todo done and the open set reconciled through the runner. A
+real token in a worktree reads your real GitLab and Done marks a real todo
+done; say so in the PR.
 
 **A worktree runs with Slack off, always** — **no `SLACK_` line of any
 kind** in a worktree's `.env`. Two Socket Mode connections to one Slack app
@@ -264,6 +294,11 @@ seam are all there), to how the preferences file is read in
 a change to delivery in webhook mode gets one in `test/slack.test.js`
 (the webhook section at the end) or `test/webhook.test.js`;
 a change to acting gets one in `test/actions.test.js` or `test/api.test.js`;
+a change to the GitLab source — the todos, the discussions, the system
+notes, Done marking the todo, the open set — gets one in
+`test/gitlab-source.test.js` against `test/fake-gitlab.js`; a change to the
+forge clients (auth headers, the per-owner token, paging, the web base) or
+to the token fallbacks gets one in `test/forge-api.test.js`;
 a change to the ledger's parsing, rules, reconcile or answers gets one in
 `test/ledger.test.js`, which writes a real queue file to a temp dir;
 a change to the CRM source — who counts as somebody else, the
@@ -277,11 +312,11 @@ which is the REST service-call API over lists it actually mutates, so
 ticking an item off and the reconcile that follows are both real. Its
 dates are derived from `NOW` rather than written down, because a due date
 is a *local* day and CI runs in UTC.
-`bin/replay.js owner/repo#n` is the other tool: it runs the rules over a
-real thread's history and prints what each step would have decided,
-reading GitHub and writing nothing — how "would that have been P0?" is
-answered without waiting for the next one. It is GitHub-only and stays
-that way: a calendar has no thread to replay, and its equivalent question
+`bin/replay.js owner/repo#n` (or `group/project!n`) is the other tool: it
+runs the rules over a real thread's history and prints what each step
+would have decided, reading the forge and writing nothing — how "would
+that have been P0?" is answered without waiting for the next one. It is
+for threads and stays that way: a calendar has no thread to replay, and its equivalent question
 is answered by `POST /api/sources/calendar/run` against
 `TRIAGE_CALENDAR=fake`, which decides everything and delivers nothing.
 
