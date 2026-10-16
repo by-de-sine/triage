@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
+    "demo": "TRIAGE_DEMO=1 node server.js",
     "test": "node --test",
     "replay": "node bin/replay.js"
   },

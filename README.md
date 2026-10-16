@@ -3,7 +3,8 @@
 Your queue, tiered. GitHub notifications, GitLab todos and merge
 requests, and your calendar (mail later) become items in one SQLite
 store; rules assign each a tier and log why; the urgent ones reach you in
-Slack within a minute of landing.
+Slack within a minute of landing. `npm run demo` shows the whole thing
+with nothing installed and no credential — §Run it starts there.
 
 Milestone **M0 · see it** polled, stored, scored and tiered everything and
 delivered only P0, as one DM with an Open button. Milestone **M1 · act on
@@ -620,14 +621,37 @@ without waiting for the next one. It reads the forge and writes nothing.
 
 ## Run it
 
-Node ≥ 24 (`node:sqlite` and `fetch` are built in). The two npm packages,
-`@slack/bolt` and `@slack/web-api`, are reached only under
-`TRIAGE_SLACK=app`, so `npm ci` is for the app path: the tests and a
-server on the webhook boot with no `node_modules` at all. GitHub, GitLab,
-Google and Twenty are stdlib `fetch` and no dependency.
+Node ≥ 24 and nothing else — `node:sqlite` and `fetch` are built in, and
+the two npm packages are reached only under `TRIAGE_SLACK=app`.
 
 ```bash
-npm test                       # node --test, in-memory store, fake GitHub, GitLab, Slack, a webhook, calendar, Home Assistant and Twenty
+git clone https://github.com/by-de-sine/triage.git && cd triage
+npm run demo          # http://127.0.0.1:3300 — a canned GitHub, GitLab, calendar, CRM, household and queue file, in memory, no credential
+npm test              # node --test, fake everything, under a second
+```
+
+Then your own queue: a GitHub token (`gh auth login` is enough) or a
+GitLab token, `node server.js`, and the page shows what is waiting on you.
+A Slack incoming webhook URL, or a Discord one, is one more line and the
+P0s reach you within a minute. The Slack app — buttons, a DM, a Home tab
+— is `slack/manifest.yml` and `TRIAGE_SLACK=app`.
+
+**The demo needs no install.** `@slack/bolt` and `@slack/web-api` are
+imported only on the app path, so with no `node_modules` at all the demo,
+the tests and a server on the webhook all boot; `npm ci` is for
+`TRIAGE_SLACK=app`. GitHub, GitLab, Google and Twenty are stdlib `fetch`
+and no dependency. The demo is `TRIAGE_DEMO=1` (plan §16, G3): every
+source runs its fake from `test/` — the five below that have a `fake`
+mode, and a queue file written to a temp dir and removed at shutdown —
+filed under `alice`, the fixtures' you; the store is in memory unless
+`TRIAGE_DB` names one; and **nothing leaves the box**: no `.env` is read
+unless `TRIAGE_ENV` names one, no token is asked for, the Slack app never
+starts, and the webhook is `TRIAGE_NOTIFY=off` — so every interrupt reads
+`not delivered: the webhook is off` in `/api/decisions` — unless
+`TRIAGE_WEBHOOK_URL` is a listener on loopback, which is how you read
+the payload. A source's own `off` still leaves its fake out.
+
+```bash
 node server.js                 # 127.0.0.1:3300 — the page is at /
 node bin/google-consent.js     # once, by hand: the Google consent that mints the refresh token
 node bin/replay.js o/r#123     # what the rules would have said, step by step (group/project!12 on GitLab)
@@ -642,11 +666,12 @@ read from the repo.
 |---|---|---|
 | `GITHUB_TOKEN` | what `gh auth token` holds | a **classic** token with `notifications` (or `repo`): GitHub's notifications endpoints — the inbox and marking a thread read — do not accept fine-grained tokens. A per-owner token in `<TRIAGE_TOKENS_DIR>/<owner>` (`~/.config/triage/tokens` by default) is used for that owner's repos when present, and those can be fine-grained; the entry is a file holding the token, or a directory holding a `gh` config (`hosts.yml`), in which case `gh auth token` is asked with `GH_CONFIG_DIR` pointed there, once every ten minutes |
 | `GITHUB_USER` | `GET /user` | who you are on GitHub — the `me` every thread rule compares an actor to on a GitHub item, and, when GitHub is on, the `user` every item is filed under |
-| `TRIAGE_GITHUB` | unset | `on` · `off`. Unset means **on if a token resolves**; `on` refuses to start without one; `off` never registers the source. A mode it does not recognise is refused at boot |
+| `TRIAGE_DEMO` | unset | `1` is the demo, above: every source on its fake, the store in memory, nothing delivered off the box. `npm run demo` sets it. Anything but `1`/`0` (or `true`/`false`, `on`/`off`, `yes`/`no`) is refused at boot |
+| `TRIAGE_GITHUB` | unset | `on` · `off` · `fake`. Unset means **on if a token resolves**; `on` refuses to start without one; `off` never registers the source; `fake` runs the canned inbox from `test/fake-github.js` (a reply on your pull request, a mention, a review request, a merge, a bot's bump, and an open set of three issues) with no token. A mode it does not recognise is refused at boot |
 | `TRIAGE_GITHUB_URL` | `https://api.github.com` | a GitHub Enterprise API base, `https://host/api/v3`; the web links pair with it |
 | `GITLAB_TOKEN` | what `glab auth token` holds | a personal access token with `read_api`, and `api` if Done is to mark the todo done. A box without `glab` reads as no token, and the source stays off |
 | `GITLAB_USER` | `GET /user` | who you are on GitLab — the `me` on a GitLab item, and the `user` every item is filed under when GitHub is off. Switching which forge is first on an existing store changes that `user` and leaves the old rows filed under the old name |
-| `TRIAGE_GITLAB` | unset | `on` · `off`, exactly as `TRIAGE_GITHUB` |
+| `TRIAGE_GITLAB` | unset | `on` · `off` · `fake`, exactly as `TRIAGE_GITHUB`; `fake` is `test/fake-gitlab.js` |
 | `TRIAGE_GITLAB_URL` | `https://gitlab.com` | the instance; the API is `/api/v4` under it |
 | `TRIAGE_GITLAB_ISSUES` | — | projects whose **open issues** are read as state and reconciled, `group/project` comma-separated (a path may nest; a URL is accepted; a bad entry is refused at boot) |
 | `TRIAGE_SLACK` | unset | `webhook` · `app` · `off`. Unset means **infer from what is configured** — `webhook` if a webhook URL is set (and `TRIAGE_NOTIFY` is not `off`), `app` if `SLACK_BOT_TOKEN` is, `off` otherwise; with both set the webhook wins and `app` says otherwise. A mode it does not recognise is refused at boot, as `TRIAGE_CALENDAR` is: a typo must not read as the default |
@@ -657,8 +682,8 @@ read from the repo.
 | `TRIAGE_TZ` | the system zone | |
 | `TRIAGE_COALESCE_MIN` | `10` | one DM per item per window. Under `app` a second interrupt inside it updates the message that is out; under `webhook`, which cannot, it is held and sent once as one follow-up when the window ends. The *first* alarm for an item is never held, in either mode |
 | `TRIAGE_DELIVER_MAX_AGE_H` | `24` | an event older than this is tiered, not sent — so the first boot does not replay the inbox into Slack. A snooze that wakes is exempt |
-| `TRIAGE_PORT` · `TRIAGE_HOST` | `3300` · `127.0.0.1` | |
-| `TRIAGE_DB` | `~/.local/state/triage/triage.db` | data, not config |
+| `TRIAGE_PORT` · `TRIAGE_HOST` | `3300` · `127.0.0.1` | `0` takes any free port, and the boot log names it |
+| `TRIAGE_DB` | `~/.local/state/triage/triage.db` | data, not config. In memory under `TRIAGE_DEMO=1` unless set |
 | `TRIAGE_GITHUB_ALL` | unset | `1` reads threads you have marked read too |
 | `TRIAGE_GITHUB_ISSUES` | — | repositories whose **open issues** are read as state and reconciled, `owner/name` comma-separated (a GitHub URL is accepted; a bad entry is refused at boot). Unset, the source is the inbox alone. A list and not an inference: "repos I work in" is not a question GitHub answers (plan §12.7). **`TRIAGE_ISSUES` is read as an alias** — the name it had before there were two forges — so a `.env` written then goes on meaning it |
 | `TRIAGE_ISSUES_EVERY_MIN` | `5` | how often each open set is read whole — one list call per repository per hundred issues. `0` reads it on every poll. Between reads the last set stands, and nothing is resolved against a set the read could not complete |
@@ -669,7 +694,7 @@ read from the repo.
 | `TRIAGE_CALENDAR_ID` | `primary` | which calendar. One, for now |
 | `TRIAGE_CALENDAR_WINDOW_H` | `48` | an event starting further out than this is not an item yet. Its start is remembered, and it becomes one when it enters the window |
 | `TRIAGE_CALENDAR_SOON_MIN` | `15` | how long before an event starts the P0 fires |
-| `TRIAGE_HA` | unset | the household to-do lists (plan §12.8). Unset means **on if `HA_URL` and `HA_TOKEN` are both set**, off otherwise; `on` refuses to start without them; `off` never registers the source; `fake` runs the canned pair of lists from `test/`, so a worktree — or a box with no route to Home Assistant — proves the whole flow, Done included. A mode it does not recognise is refused at boot, as `TRIAGE_CALENDAR` is. **It is unset in production**: whether the box triage runs on may reach Home Assistant is a decision about the network, and it is in the queue |
+| `TRIAGE_HA` | unset | the household to-do lists (plan §12.8). Unset means **on if `HA_URL` and `HA_TOKEN` are both set**, off otherwise; `on` refuses to start without them; `off` never registers the source; `fake` runs the canned pair of lists from `test/` — `todo.alice_inbox` and `todo.household`, read unless `HA_LISTS` names some of them — so a worktree, or a box with no route to Home Assistant, proves the whole flow, Done included. A mode it does not recognise is refused at boot, as `TRIAGE_CALENDAR` is. **It is unset in production**: whether the box triage runs on may reach Home Assistant is a decision about the network, and it is in the queue |
 | `HA_URL` · `HA_TOKEN` | — | where Home Assistant is (`http://<host>:8123`, or a Nabu Casa remote URL) and a **long-lived access token** from Profile → Security. Home Assistant has no narrower grant: the token can do whatever the user who minted it can do, which is why the only write in this tree is ticking one item off |
 | `HA_LISTS` | — | which lists are read (none by default, so the source is off until this names one), as `todo.*` entity ids, comma- or space-separated. A list whose name ends in `inbox` is *yours* (`inbox_item`); anything else is the house's. A bad entry is refused at boot |
 | `TRIAGE_HA_DASHBOARD` | `<HA_URL>/todo` | where an item's **Open** goes. Home Assistant has no deep link to a single to-do item, so it is the to-do panel — set it to the dashboard you would actually tap if that is not it |

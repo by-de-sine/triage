@@ -1768,6 +1768,20 @@ and to delivery off. *README:* the quickstart of §16.2, verbatim, at the
 top. *`.env.example`:* one line. *Production prerequisite:* none.
 *Cost:* an afternoon.
 
+*Built 2026-10-15, three things beyond the paragraph above.* (1) The two
+forges gained a `fake` mode (`TRIAGE_GITHUB=fake`, `TRIAGE_GITLAB=fake`)
+like the other three sources, so the demo is one rule — every source's
+mode becomes `fake` unless that source says `off` — and one forge can be
+proved alone; the GitHub fake's `demoGithub()` is ported from the
+reference with the fixtures' names. (2) With `TRIAGE_DEMO` in the
+environment the default `.env` is not read, so a stranger's own
+`TRIAGE_DB` cannot collect the demo's items; a `TRIAGE_ENV` that is named
+is read, which is how a worktree runs the demo. The app path's tokens are
+dropped and a non-loopback webhook URL is not even held. (3)
+`TRIAGE_HA=fake` reads the fake's two lists when `HA_LISTS` names none —
+it had read nothing on its own. The quickstart sits at the top of
+README §Run it, with a pointer to it in the README's opening line.
+
 **G4 · the calendar as an ICS feed.** *Sits beside* the Google path and
 is the default reading of `TRIAGE_CALENDAR_URL` or `TRIAGE_CALENDAR_FILE`:
 `lib/ics.js` (enough of RFC 5545 — unfolding, zones through `Intl`, all-day
