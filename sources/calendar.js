@@ -1,10 +1,23 @@
 // calendar — the second source (plan §5), and the proof that the seam is not
-// GitHub-shaped. Reads one Google calendar with `events.list`, owns a
-// `syncToken` as its cursor, and turns the events starting in the next 48 h
-// into items. Never writes: not to the store, and not to Google — the scope
-// is `calendar.readonly`, so Done on a calendar item is local (lib/actions.js).
+// GitHub-shaped. Two readers of one calendar, picked by what the context
+// carries, and the rest — the item's shape, the rules, the clock, the curve,
+// the project — shared:
 //
-// Two things happen here, and they are deliberately separate:
+//   - **an ICS feed** (plan §16, G4; `feed` in the context), the default:
+//     every calendar publishes one — Google's "secret address in iCal
+//     format", Outlook's "publish calendar", a Fastmail or Apple
+//     subscription URL — so there is no OAuth client and no consent step;
+//     the URL is the credential. Read whole (conditionally, and at most
+//     every few minutes), expanded with lib/ics.js, and **state**: an event
+//     gone from the feed is resolved by `reconcile`. Below the Google half.
+//   - **Google's `events.list`** (`api` in the context), the path M3 built,
+//     kept behind its own configuration until the feed has run a week in
+//     production (plan §16.7 item b).
+//
+// Neither writes: not to the store, and not to the calendar — Done on a
+// calendar item is local (lib/actions.js).
+//
+// For the Google path, two things happen, and they are deliberately separate:
 //
 //   poll(ctx)   what Google says changed. `syncToken` is the whole cursor:
 //               the first call is a full sync and every one after it asks
@@ -31,7 +44,10 @@
 // Event keys are `calendar:<eventId>:<updated>` (and
 // `calendar:starts:<eventId>:<start>` for the alarm), so a restart, a
 // re-poll and a second `due` in the same minute all re-emit nothing.
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { oneLine } from '../lib/util.js';
+import { parseIcs, instances, text, prop, address, joinLink, partsIn, ymd } from '../lib/ics.js';
 
 export const WINDOW_MS = 48 * 3_600_000;    // items are events starting in this
 export const SOON_MS = 15 * 60_000;         // the P0 lead time
@@ -148,8 +164,11 @@ export default {
    *  is already on every item, put there by `normalise`. */
   project: (item) => item.data?.calendar_id || null,
 
-  /** @returns {Promise<{batches: Array<{item, events}>, cursor, status}>} */
-  async poll({ api, cursor, now = new Date(), log = () => {}, calendarId = 'primary', windowMs = WINDOW_MS }) {
+  /** The feed when the context names one, else Google.
+   *  @returns {Promise<{batches: Array<{item, events}>, cursor, status}>} */
+  poll(ctx) { return ctx.feed ? pollFeed(ctx) : this.pollGoogle(ctx); },
+
+  async pollGoogle({ api, cursor, now = new Date(), log = () => {}, calendarId = 'primary', windowMs = WINDOW_MS }) {
     const prev = cursor || {};
     const path = `/calendars/${encodeURIComponent(calendarId)}/events`;
     const t = now.getTime();
@@ -242,10 +261,153 @@ export default {
     return { batches };
   },
 
-  /** What /api/sources shows. Never the sync token itself: it is opaque
-   *  state, it is long, and nothing is learned by printing it. */
+  /** The state half, for the feed: what the last complete read held. An
+   *  event gone from the feed is resolved, attributed to the source; an item
+   *  whose start is outside the window the read covered is not the set's to
+   *  speak for — a meeting from last week did not leave the calendar, it
+   *  left the window. The Google path never resolved, and still does not:
+   *  its sync is incremental, so it has no whole set to hand over. */
+  reconcile({ cursor, now = new Date(), windowMs = WINDOW_MS }) {
+    if (!cursor || cursor.reader !== 'ics' || !cursor.fetched_at) return null;
+    const t = now.getTime();
+    return { keys: Object.keys(cursor.hashes || {}), complete: !!cursor.ok, error: cursor.error || null,
+      governs: (item) => { const s = Date.parse(item.data?.start || ''); return Number.isFinite(s) && s >= t - DAY && s - t <= windowMs; } };
+  },
+
+  /** What /api/sources shows. Never the sync token itself — it is opaque
+   *  state, it is long, and nothing is learned by printing it — and never
+   *  the feed's URL, which is the credential. */
   describeCursor(state) {
     if (!state || typeof state !== 'object') return state;
+    if (state.reader === 'ics') return { reader: 'ics', fetched_at: state.fetched_at || null, read_at: state.read_at || null, ok: !!state.ok, error: state.error || null, entries: state.count ?? null, in_window: Object.keys(state.hashes || {}).length, name: state.name || null };
     return { sync_token: state.sync_token ? 'held' : null, synced_at: state.synced_at || null, upcoming: Object.keys(state.upcoming || {}).length };
   },
 };
+
+// --- the feed ----------------------------------------------------------------
+const DAY = 86_400_000;
+export const FETCH_MS = 5 * 60_000;           // a URL is fetched at most this often
+export const MAX_FEED_BYTES = 20 * 1024 * 1024;
+const sha = (x) => createHash('sha1').update(x).digest('hex').slice(0, 12);
+// What a 304, or a poll inside FETCH_MS, re-reads: per feed object, so two
+// tests (or two feeds) never share one. Lost on a restart, and then the
+// next poll simply fetches.
+const fetched = new WeakMap();
+
+/** Which addresses are you, from TRIAGE_CALENDAR_ME: comma- or space-separated. */
+const addresses = (me) => new Set(String(me || '').split(/[,\s]+/).map((x) => address(x)).filter((x) => x.includes('@')));
+
+/** `20260920T120000Z` -> ISO, or null. */
+function isoOf(v) {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/.exec(String(v || '').trim());
+  if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])).toISOString();
+  return null;
+}
+
+/** One instance of a feed's event -> `{ item, events }`, the same shape the
+ *  Google half's `normalise` makes, so every rule, the clock, the curve and
+ *  the message read both without knowing which. The item key is the UID,
+ *  and `UID@<occurrence>` for one occurrence of a recurring event; the
+ *  event key hashes what a rule reads, so a reschedule, a cancellation or
+ *  an answer re-tiers it and an unchanged feed emits nothing. */
+export function normaliseInstance(inst, { me = '', calendarId = 'calendar' } = {}) {
+  const { ev, uid, start, end, allDay, recurrenceId, tz } = inst;
+  const mine = addresses(me);
+  const org = prop(ev, 'ORGANIZER');
+  const organizerAddr = org ? address(org.value) : null;
+  const attendees = (ev.ATTENDEE || []).filter((a) => !['RESOURCE', 'ROOM'].includes((a.params.CUTYPE || '').toUpperCase())).map((a) => {
+    const addr = address(a.value);
+    return { name: a.params.CN || addr, email: addr, response: (a.params.PARTSTAT || '').toLowerCase() || null, self: mine.has(addr) };
+  });
+  const self = attendees.find((a) => a.self) || null;
+  const guests = attendees.filter((a) => !a.self).length;
+  // Yours when you organise it, or when nobody is named at all — an entry
+  // of your own in your own calendar has neither an organizer nor guests.
+  const owned = !!(organizerAddr && mine.has(organizerAddr)) || (!org && attendees.length === 0);
+  const organizer = org ? org.params.CN || organizerAddr : null;
+  // Google's words for an answer, which the rules and the message already read.
+  const part = self?.response || null;
+  const response = part === 'needs-action' ? 'needsAction' : part || (owned ? 'accepted' : null);
+  const status = (text(ev, 'STATUS') || 'confirmed').toLowerCase();
+  // An all-day entry is a date, in the zone it was read in; a timed one an instant.
+  const startIso = allDay ? ymd(partsIn(start, tz)) : new Date(start).toISOString();
+  const endIso = allDay ? ymd(partsIn(end, tz)) : new Date(end).toISOString();
+  const key = recurrenceId != null ? `${uid}@${new Date(recurrenceId).toISOString()}` : uid;
+  const title = text(ev, 'SUMMARY') || '(no title)';
+  // When it last changed, as the feed says; DTSTAMP last, because some
+  // exporters stamp every event with the time of the export.
+  const changed = isoOf(text(ev, 'LAST-MODIFIED')) || isoOf(text(ev, 'CREATED')) || isoOf(text(ev, 'DTSTAMP')) || startIso;
+  const location = text(ev, 'LOCATION') ? oneLine(text(ev, 'LOCATION'), 120) : null;
+  const item = {
+    source: 'calendar', key, kind: 'event', title, url: text(ev, 'URL') || null, repo: null,
+    actors: attendees.map((a) => a.name).filter(Boolean),
+    my_role: owned ? 'organizer' : response === 'needsAction' ? 'invited' : self ? 'attendee' : 'subscribed',
+    last_activity: changed, last_seen: changed,
+    data: {
+      calendar_id: calendarId, start: startIso, end: endIso, all_day: allDay, status,
+      location, join: joinLink(ev), organizer, mine: owned, response, guests,
+      attendees: attendees.slice(0, 20).map((a) => ({ name: a.name, response: a.response === 'needs-action' ? 'needsAction' : a.response, self: a.self })),
+      recurring: recurrenceId != null,
+    },
+  };
+  const hash = sha(JSON.stringify([title, startIso, endIso, status, location, response, guests, item.data.join, organizer, owned, calendarId]));
+  const kind = status === 'cancelled' ? 'cancelled' : (response === 'needsAction' && !owned) ? 'invite' : 'update';
+  const events = [{ key: `calendar:${key}:${hash}`, ts: changed, kind, actor: organizer, body: text(ev, 'DESCRIPTION') ? oneLine(text(ev, 'DESCRIPTION'), 600) : null, url: item.url, data: { start: startIso, all_day: allDay, response, guests, status } }];
+  return { item, events, hash };
+}
+
+/** The feed's text: a literal or a function of nothing (the tests, the
+ *  fake), a file, or a URL — fetched at most every `fetchMs`, and then
+ *  conditionally, so a feed that has not changed costs a 304. */
+async function readFeed(feed, { now, fetchMs, fetch }) {
+  if (feed.text != null) return { text: typeof feed.text === 'function' ? feed.text() : feed.text, how: 'read' };
+  if (feed.file) return { text: readFileSync(feed.file, 'utf8'), how: 'read' };
+  const c = fetched.get(feed);
+  if (c && now.getTime() - c.at < fetchMs) return { ...c, how: 'cached' };
+  const headers = { accept: 'text/calendar, */*;q=0.5', 'user-agent': 'triage' };
+  if (c?.etag) headers['if-none-match'] = c.etag;
+  if (c?.last_modified) headers['if-modified-since'] = c.last_modified;
+  const res = await fetch(feed.url, { headers, signal: AbortSignal.timeout(30_000) });
+  // The status and nothing else: the URL is the credential, and it is never
+  // in a message, a log line or the cursor.
+  if (res.status === 304 && c) { fetched.set(feed, { ...c, at: now.getTime() }); return { ...c, how: 'not modified' }; }
+  if (!res.ok) throw new Error(`the feed answered HTTP ${res.status}`);
+  if (Number(res.headers.get('content-length')) > MAX_FEED_BYTES) throw new Error(`the feed is larger than ${MAX_FEED_BYTES >> 20} MB`);
+  const body = await res.text();
+  if (body.length > MAX_FEED_BYTES) throw new Error(`the feed is larger than ${MAX_FEED_BYTES >> 20} MB`);
+  if (!/BEGIN:VCALENDAR/i.test(body.slice(0, 4096))) throw new Error('the feed is not a calendar (no BEGIN:VCALENDAR)');
+  const out = { text: body, etag: res.headers.get('etag'), last_modified: res.headers.get('last-modified'), at: now.getTime() };
+  fetched.set(feed, out);
+  return { ...out, how: 'fetched' };
+}
+
+/** One poll of the feed. Expands the window — from a day back, so a meeting
+ *  that just ended is still spoken for, to `windowMs` ahead — and emits only
+ *  the instances whose hash moved since the last read. The cursor's
+ *  `hashes` is the whole set, which is what `reconcile` hands the runner.
+ *  A read that fails keeps the last set and says it is not complete, so
+ *  nothing is resolved on the strength of an outage. */
+export async function pollFeed({ feed, cursor, me = '', now = new Date(), windowMs = WINDOW_MS, calendarId = null, tz = 'UTC', fetchMs = FETCH_MS, fetch = globalThis.fetch }) {
+  const prev = cursor?.reader === 'ics' ? cursor : {};
+  const t = now.getTime();
+  let r;
+  try { r = await readFeed(feed, { now, fetchMs, fetch }); }
+  catch (e) {
+    const error = e.name === 'TimeoutError' ? 'the feed did not answer in 30 s' : e.message;
+    return { batches: [], cursor: { ...prev, reader: 'ics', ok: false, error, read_at: now.toISOString(), fetched_at: prev.fetched_at || now.toISOString() }, status: `feed not read: ${error}` };
+  }
+  const { events, name } = parseIcs(r.text);
+  const id = calendarId || name || feed.name || 'calendar';
+  const old = prev.hashes || {};
+  const hashes = {}, batches = [];
+  for (const inst of instances(events, { fromMs: t - DAY, toMs: t + windowMs, tz })) {
+    const b = normaliseInstance(inst, { me, calendarId: id });
+    hashes[b.item.key] = b.hash;
+    if (old[b.item.key] !== b.hash) batches.push({ item: b.item, events: b.events });
+  }
+  return {
+    batches,
+    cursor: { reader: 'ics', fetched_at: r.how === 'cached' ? prev.fetched_at || now.toISOString() : now.toISOString(), read_at: now.toISOString(), etag: r.etag || null, last_modified: r.last_modified || null, hashes, ok: true, error: null, count: events.length, name: name || null },
+    status: `${r.how} — ${events.length} entries, ${Object.keys(hashes).length} in the window, ${batches.length} changed`,
+  };
+}

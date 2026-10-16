@@ -93,12 +93,14 @@ await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken, {}, async () =
 const user = cfg.demo ? 'alice' : store.firstUser() ?? identity.github ?? identity.gitlab ?? null;
 if (user && Object.values(identity).length && !Object.values(identity).some((me) => sameLogin(me, user))) log(`items belong to ${user} (the store's), which is none of this boot's identities (${Object.entries(identity).map(([k, v]) => `${k}: ${v}`).join(', ')}) — set TRIAGE_DB to start a queue of your own`);
 
-// M3: the second source. It registers only when it can actually read a
-// calendar — a Google OAuth client and a refresh token are ring-0 work
-// (plan §9 item 5), and a box without them should run the rest of triage
-// rather than fail a poll a minute. `fake` is the canned calendar from
-// test/.
+// M3: the second source, read from an ICS feed (plan §16, G4) or from
+// Google. It registers only when it can actually read a calendar — a box
+// without a feed or credentials should run the rest of triage rather than
+// fail a poll a minute. `fake` is the canned feed from test/.
 const cal = await calendarSource(cfg.calendar, log);
+// Your addresses on invitations: `me` to the feed's reader, through the
+// identity map like every source's.
+if (cal?.feed) identity.calendar = cfg.calendar.me.join(', ') || undefined;
 // The ledger (plan §12.3): local files, so it registers whenever the queue
 // file is there. The first state-shaped source, and the first with a
 // reconcile — nothing in lib/ knows what a queue row is.
@@ -142,7 +144,7 @@ if (cfg.slack.mode === 'webhook' && cfg.slack.notify !== 'off') log(`notify: int
 // entry (the forges: the thread read, the todo done); the rest are the
 // sentences for what a read-only source does about it.
 const marks = {
-  calendar: async () => 'nothing marked on Google — triage only reads your calendar',
+  calendar: async () => (cal?.feed ? 'nothing marked on your calendar — triage only reads the feed' : 'nothing marked on Google — triage only reads your calendar'),
   ledger: async () => 'nothing changed in the ledger — triage only reads it; the row closes when whoever owns it deletes it',
   // The one write this process makes outside its own store. The entry is
   // here even when the source is off, because the default answer —
@@ -164,7 +166,9 @@ const runner = new Runner(store, sources, {
   user, identity,
   rules,
   deliver, rank,
-  extras: { ...extras, calendar: { api: cal, calendarId: cfg.calendar.id, windowMs: cfg.calendar.windowMs, soonMs: cfg.calendar.soonMs }, ledger: led || {}, ha: { api: hass, lists: cfg.ha.lists, dashboard: cfg.ha.dashboard },
+  extras: { ...extras, calendar: cal?.feed
+    ? { feed: cal.feed, calendarId: cfg.calendar.id, tz: cfg.slack.tz, fetchMs: cfg.calendar.fetchMs, windowMs: cfg.calendar.windowMs, soonMs: cfg.calendar.soonMs }
+    : { api: cal?.api ?? null, calendarId: cfg.calendar.id || 'primary', windowMs: cfg.calendar.windowMs, soonMs: cfg.calendar.soonMs }, ledger: led || {}, ha: { api: hass, lists: cfg.ha.lists, dashboard: cfg.ha.dashboard },
     // `health` is the one mutable thing in an extras block: the source writes
     // the last read's error into it and its clock half reads it back, so the
     // alarm for a CRM that never answers can say why. `startedAt` is when
@@ -177,25 +181,37 @@ const server = http.createServer(app);
 // The port as bound, not as asked: `TRIAGE_PORT=0` takes any free one.
 server.listen(cfg.port, cfg.host, () => { log(`listening on http://${cfg.host}:${server.address().port}`); runner.start(); });
 
-/** The calendar's client, or null when it should not be registered. Says
- *  out loud which of the three it is, because "the calendar is quiet" and
- *  "the calendar is off" look identical from a list page. */
+/** How the calendar is read — `{ feed }` or `{ api }` — or null when it
+ *  should not be registered. Says out loud which it is, because "the
+ *  calendar is quiet" and "the calendar is off" look identical from a list
+ *  page. Unset is the feed when one is named, Google when its credentials
+ *  resolve, off otherwise (plan §16.7 item b: both paths, until the feed
+ *  has had its week). */
 async function calendarSource(c, log) {
+  const ahead = `the next ${Math.round(c.windowMs / 3_600_000)} h, P0 ${Math.round(c.soonMs / 60_000)} min ahead`;
   if (c.mode === 'off') { log('calendar: off (TRIAGE_CALENDAR=off)'); return null; }
   if (c.mode === 'fake') {
-    const { demoCalendar } = await import('./test/fake-calendar.js');
-    log('calendar: FAKE (TRIAGE_CALENDAR=fake) — the canned calendar from test/; every title says (fake)');
-    return demoCalendar();
+    const { demoIcs } = await import('./test/fake-calendar.js');
+    // The canned day's you, unless TRIAGE_CALENDAR_ME says otherwise.
+    if (!c.me.length) c.me.push('alice@example.com');
+    log(`calendar: FAKE (TRIAGE_CALENDAR=fake) — the canned feed from test/, ${ahead}, as ${c.me.join(', ')}; every title says (fake)`);
+    return { feed: { text: demoIcs(), name: 'fake' } };
+  }
+  if (c.mode === 'ics' || (!c.mode && c.feed)) {
+    if (!c.feed) { log('calendar: off — TRIAGE_CALENDAR=ics, but neither TRIAGE_CALENDAR_URL nor TRIAGE_CALENDAR_FILE names a feed'); process.exit(1); }
+    // The host, never the path: the path of a published feed is its secret.
+    log(`calendar: the feed ${c.feed.file || `at ${c.feed.host}`}${c.feed.url ? `, fetched at most every ${Math.round(c.fetchMs / 60_000)} min` : ''}, ${ahead}${c.me.length ? `, as ${c.me.join(', ')}` : ' — TRIAGE_CALENDAR_ME unset, so no invitation can be yours to answer'}`);
+    return { feed: c.feed };
   }
   const creds = readCredentials(c);
   if (!creds) {
     const how = c.mode === 'google' ? 'TRIAGE_CALENDAR=google, but ' : '';
-    log(`calendar: off — ${how}no Google credentials (${c.clientFile} and ${c.tokenFile}); run bin/google-consent.js once, or set TRIAGE_CALENDAR=fake`);
+    log(`calendar: off — ${how}no feed (TRIAGE_CALENDAR_URL or TRIAGE_CALENDAR_FILE) and no Google credentials (${c.clientFile} and ${c.tokenFile}); or set TRIAGE_CALENDAR=fake`);
     if (c.mode === 'google') process.exit(1);
     return null;
   }
-  log(`calendar: ${c.id}, the next ${Math.round(c.windowMs / 3_600_000)} h, P0 ${Math.round(c.soonMs / 60_000)} min ahead`);
-  return new GoogleApi(creds);
+  log(`calendar: Google, ${c.id || 'primary'}, ${ahead}`);
+  return { api: new GoogleApi(creds) };
 }
 
 /** The Home Assistant client, or null when the source should not be
