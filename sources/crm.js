@@ -29,7 +29,12 @@
 // (your agents act through the API under a key's name, so that list is the
 // names of their keys). Anything else — a colleague in the UI, their agents,
 // a key nobody has named — is somebody else, which is the safe direction to
-// be wrong in.
+// be wrong in. It is also the direction that drifts: a key minted after the
+// list was written (2026-10-17, the first weekend of it) is "somebody else"
+// until someone notices, and what they notice is their own agents' edits
+// arriving as P0s. So a key nobody named is said out loud — once per key,
+// in the log and on every poll's status line — the moment it first edits
+// something, naming the variable to add it to.
 //
 // **The read is two-phase, because a body is most of the bytes.** Phase one
 // is every open task and every note *without* bodies; phase two asks for the
@@ -85,6 +90,15 @@ export function isOther(by, { self = new Set(), agents = [] } = {}) {
   const n = String(a.name || '').trim().toLowerCase();
   if (n && agents.some((x) => String(x).trim().toLowerCase() === n)) return false;
   return true;
+}
+
+/** A key nobody has named: an edit through the API (or an agent surface)
+ *  that carries a key's name and no member, by a name neither list holds.
+ *  Somebody else by the rule above — but worth saying, because the other
+ *  reading is a key of yours that the config has not caught up with. */
+export function unnamedKey(by, whoIs) {
+  const a = actorOf(by);
+  return !!a.name && !a.member && !!a.source && a.source !== 'MANUAL' && isOther(by, whoIs);
 }
 
 /** How a reason names the actor: the member's name, and how they did it
@@ -173,6 +187,20 @@ export default {
    *  (`Acme Corp=acme`) or by itself when unnamed. */
   project: (item) => item.data?.project || null,
 
+  /** Every name you act under here, for the identity map the reports read
+   *  (`lib/reports.js`): the member names `TRIAGE_CRM_ME` resolves to, and
+   *  the keys `TRIAGE_CRM_AGENTS` names. A forge knows you as one login; the
+   *  CRM knows you as a person and as the keys your agents hold, and an edit
+   *  by either is yours — in the rules already (`isOther`), and from here in
+   *  the reports too, so "what my agents did today" is counted as yours
+   *  rather than as a stranger's. Reads the member list once, at boot. */
+  async whoami({ api, self = [], agents = [] }) {
+    const members = (await api.members()).rows;
+    const ids = resolveSelf(self, members);
+    const names = members.filter((m) => ids.has(m.id)).map(memberName).filter(Boolean);
+    return [...new Set([...names, ...agents])];
+  },
+
   /** The read's own alarm, on the clock rather than on an answer — exactly
    *  why `due` exists (lib/runner.js): it runs before the poll, in its own
    *  try, so a CRM that never answers still raises it. The event is keyed on
@@ -223,6 +251,18 @@ export default {
     const batches = [];
     const tasks = {}, notes = {};
     let open = 0, closed = 0, others = 0;
+    // The keys nobody named, seen editing on this read; `health.unnamed`
+    // carries the ones already said, so each is said once per process.
+    const unnamed = new Set();
+    const noteUnnamed = (by) => {
+      if (baseline || !unnamedKey(by, whoIs)) return;
+      const name = actorOf(by).name;
+      unnamed.add(name);
+      health.unnamed ||= [];
+      if (health.unnamed.some((x) => x.toLowerCase() === name.toLowerCase())) return;
+      health.unnamed.push(name);
+      log(`"${name}" edits records through the API and is on no list, so its edits are somebody else's — if it is a key of yours, add it to TRIAGE_CRM_AGENTS`);
+    };
 
     for (const t of r.tasks) {
       const was = prev?.tasks?.[t.id];
@@ -241,7 +281,7 @@ export default {
       const other = isOther(t.updatedBy, whoIs);
       // Counted only when the content moved: the status line says what
       // happened on this read, not who touched each task last.
-      if (other && !baseline && was?.hash !== fp.hash) others++;
+      if (other && !baseline && was?.hash !== fp.hash) { others++; noteUnnamed(t.updatedBy); }
       const companyId = companyOf(t.taskTargets, people);
       const project = projectOf(companyId);
       const url = api.link('task', t.id);
@@ -282,7 +322,7 @@ export default {
       const item = !!was?.item || (other && !baseline);
       notes[n.id] = { at: n.updatedAt, hash: fp.hash, parts: fp.parts, item };
       if (!item || was?.hash === fp.hash) continue;
-      if (other) others++;
+      if (other) { others++; noteUnnamed(n.updatedBy); }
       const by = actorOf(n.updatedBy);
       const authored = !!n.createdBy && !isOther(n.createdBy, whoIs);
       const companyId = companyOf(n.noteTargets, people);
@@ -314,7 +354,7 @@ export default {
         tasks, notes, read_at: nowIso, complete_at: complete ? nowIso : prev?.complete_at || null, complete, error,
         counts: { open, closed, notes: r.notes.length, others },
       },
-      status: `${open} open tasks, ${r.notes.length} notes${baseline ? ' (baseline)' : ''}${others ? `, ${others} changed by someone else` : ''}${complete ? '' : ', INCOMPLETE'}`,
+      status: `${open} open tasks, ${r.notes.length} notes${baseline ? ' (baseline)' : ''}${others ? `, ${others} changed by someone else` : ''}${unnamed.size ? ` (by a key nobody named: ${[...unnamed].join(', ')})` : ''}${complete ? '' : ', INCOMPLETE'}`,
     };
   },
 

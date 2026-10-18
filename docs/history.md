@@ -18,6 +18,7 @@ over.
 | 2026-09-12 | **The ledger** — the first state-shaped source; `reconcile`; the ask grammar | §12.2, §12.3 |
 | 2026-09-13 | **Open issues as state** — GitHub's second mode; `governs` | §12.3 |
 | 2026-09 | **Interrupt preferences** — four layers, `project(item)`, the mention; prompted by the first real interrupt, which arrived as an unread badge and notified nobody | §14 |
+| 2026-10-18 | **The changelog** — the window read back, by who moved it; the CRM says every name you act under (`whoami`), and a key nobody named is said out loud. Prompted by a weekend of the owner's own agents arriving as P0s under a key the config did not know | §15 |
 | 2026-09-19 | **Reports** — `/stats` and `/api/reports` | §15 |
 | 2026-09-20 | **Home Assistant** — the first source that writes on Done, and the first that needed no widening of the seam | §12.8 |
 | 2026-10-03 | **The CRM** — Twenty's tasks as state, others' edits as events, a watched read | §12.3 |

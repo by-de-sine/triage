@@ -113,7 +113,7 @@ function reportUrl(name, params = {}) {
  *  the export. The same four answers the page just drew, unchanged. */
 async function exportWindow() {
   const w = window_();
-  const names = ['flow', 'when', 'where', 'response'];
+  const names = ['flow', 'when', 'where', 'response', 'changelog'];
   const params = { when: state.whenSource ? { source: state.whenSource } : {}, where: { by: state.whereBy } };
   const reports = await Promise.all(names.map((n) => fetchReport(n, params[n] || {})));
   const body = { exported: new Date().toISOString(), since: w.since, until: w.until, bucket: w.bucket, reports: Object.fromEntries(names.map((n, i) => [n, reports[i]])) };
@@ -387,6 +387,34 @@ function drawResponse(r) {
   if (r.n) fig.append(table(['when', 'item', 'action', 'waited', 'since'], r.samples.slice().reverse().map((s) => [s.at.slice(0, 16).replace('T', ' '), s.item_key || s.item_id, s.action, hours(s.hours), s.from])));
 }
 
+/** The change log, from `changelog`: one row per item per bucket, newest
+ *  first — the day or the week read back. Here the table is the chart, so
+ *  it is not folded under a summary. */
+function drawChangelog(r) {
+  const fig = $('#log-chart'); fig.replaceChildren();
+  const T = r.totals;
+  fig.append(caption('what moved, and who moved it', `${T.items} rows · you ${T.who.you} · others ${T.who.others} · bots ${T.who.bots} · ${T.interrupts} interrupted${T.folded ? ` · ${T.folded} past the cap, in the JSON as a count` : ''}`, 'changelog'));
+  const rows = r.buckets.slice().reverse().flatMap((b) => b.entries.map((e) => ({ ...e, bucket: b.key })));
+  if (!rows.length) { fig.append(el('div', 'empty', 'nothing in the window')); return; }
+  fig.append(el('div', 'lead', '"you" is every name you act under on the source — your agents included. A row that reached Slack is marked.'));
+  const wrap = el('div', 'tablewrap log');
+  const t = el('table');
+  const tr = el('tr'); for (const h of ['when', 'item', 'where', 'who', 'what', 'verdict', 'you did']) tr.append(el('th', null, h)); t.append(tr);
+  const name = (a) => (a.who === 'you' ? `${a.name} (you)` : a.who === 'bots' ? `${a.name} (bot)` : a.name);
+  for (const e of rows) {
+    const row = el('tr', e.interrupted ? 'interrupted' : null);
+    row.append(el('td', null, (e.last || e.bucket).slice(0, 16).replace('T', ' ')));
+    const td = el('td'); const a = el('a', null, e.title || e.item_key || String(e.item_id)); if (e.url) { a.href = e.url; a.target = '_blank'; a.rel = 'noopener'; } td.append(a); row.append(td);
+    row.append(el('td', null, e.repo || e.source || '—'));
+    row.append(el('td', null, e.actors.map(name).join(', ') || '—'));
+    row.append(el('td', null, Object.entries(e.events).map(([k, n]) => (n > 1 ? `${k} ×${n}` : k)).join(', ') || '—'));
+    row.append(el('td', null, e.verdict ? `${e.verdict.tier} ${e.verdict.rule}${e.verdict.reason ? ` — ${e.verdict.reason}` : ''}${e.interrupted ? ' · interrupted' : ''}` : '—'));
+    row.append(el('td', null, e.actions.join(', ') || '—'));
+    t.append(row);
+  }
+  wrap.append(t); fig.append(wrap);
+}
+
 // --- load ---------------------------------------------------------------------
 let generation = 0;
 /** Fetch every report for the window and draw the page. Only the newest load may draw. */
@@ -397,12 +425,12 @@ async function load() {
   $('#window').textContent = `${new Date(w.since).toLocaleDateString([], { month: 'short', day: 'numeric' })} → today · by the ${w.bucket}`;
   for (const b of $('#range').children) b.setAttribute('aria-pressed', String(parseInt(b.dataset.days, 10) === state.days));
   try {
-    const [flow, when, where, response, health] = await Promise.all([
-      fetchReport('flow'), fetchReport('when', state.whenSource ? { source: state.whenSource } : {}), fetchReport('where', { by: state.whereBy }), fetchReport('response'),
+    const [flow, when, where, response, changelog, health] = await Promise.all([
+      fetchReport('flow'), fetchReport('when', state.whenSource ? { source: state.whenSource } : {}), fetchReport('where', { by: state.whereBy }), fetchReport('response'), fetchReport('changelog'),
       fetch('/healthz').then((r) => r.json()),
     ]);
     if (gen !== generation) return;
-    drawFlow(flow); drawWhen(when); drawWhere(where); drawResponse(response);
+    drawFlow(flow); drawWhen(when); drawWhere(where); drawResponse(response); drawChangelog(changelog);
     $('#dot').className = `dot ${health.failing?.length ? 'bad' : 'ok'}`;
     $('#observed').textContent = `${health.user} · ${health.items} items · ${health.decisions} verdicts · ${flow.tz}`;
     const glance = $('#glance'); glance.replaceChildren();

@@ -20,6 +20,15 @@ Read from each record's own `updatedBy`: not your workspace member
 (`TRIAGE_CRM_AGENTS`). Anything else — including a key nobody has named —
 is somebody else.
 
+That is the safe direction to be wrong in, and the one that drifts: a key
+minted after the list was written is somebody else until someone notices,
+and what they notice is their own agents' edits arriving as P0s. So the
+first time a key nobody named edits a record, the log says so once —
+`"Kevin" edits records through the API and is on no list … add it to
+TRIAGE_CRM_AGENTS` — and the poll's status line names it for as long as it
+keeps editing. If the key is yours, add it and restart; its edits then
+re-rank quietly, and the [reports](../using.md#reports) count them as yours.
+
 Twenty has no comments, so a collaborator's reply arrives as an edit to a
 body or a new note. That is why the event is keyed on the record **and a
 fingerprint of its content** (title, body, status, assignee, due): an edit
@@ -75,7 +84,7 @@ no write path.
 | `TRIAGE_CRM` | unset | `on` · `off` · `fake`. Unset: on if the three below are set. `fake` runs `test/fake-twenty.js`, where on the second read a colleague hands you a task (P0), rewords one you handed them (P1), and an unnamed key adds a note (P2) |
 | `TWENTY_URL` · `TWENTY_API_KEY` | — | where Twenty is, and a key from *Settings › APIs › API keys* bound to a **read-only** role. Read over GraphQL. Never an admin key: triage must not be able to write to the system of record |
 | `TRIAGE_CRM_ME` | — | you, as a workspace member: an id, email or full name, comma-separated. No default — a source that cannot recognise you reads all your own edits as somebody else's. An entry matching no member fails the read |
-| `TRIAGE_CRM_AGENTS` | — | the `updatedBy.name` your agents' API edits carry (their keys' names), comma-separated. Unset means you have no agents |
+| `TRIAGE_CRM_AGENTS` | — | the `updatedBy.name` your agents' API edits carry (their keys' names), comma-separated. Unset means you have no agents. A key this list does not name is somebody else, and is named in the log the first time it edits something |
 | `TRIAGE_CRM_PROJECTS` | — | `Company Name=project`, comma-separated, so preferences and interrupt statements can scope to a company |
 | `TRIAGE_CRM_STALE_MIN` | `30` | minutes without a complete read before `crm_unread`. `0` turns the alarm off |
 
