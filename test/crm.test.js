@@ -263,7 +263,7 @@ test('a CRM that cannot be read is a P0 after the stale window — once per outa
   api.fail = 'auth';
   let r = await tick(10);
   assert.equal(r.ok, false);
-  assert.match(r.error, /key was refused/);
+  assert.match(r.error, /request refused — check the Twenty API key and Cloudflare Access policy/);
   assert.equal(item(null, 'health'), undefined);
   r = await tick(29);
   assert.equal(store.items({ user: ME, source: 'crm' }).find((i) => i.key === HEALTH_KEY), undefined, 'inside the window, silence is allowed');
@@ -272,7 +272,7 @@ test('a CRM that cannot be read is a P0 after the stale window — once per outa
   const alarm = r.due.decisions[0];
   assert.equal(alarm.rule, 'crm_unread');
   assert.equal(alarm.tier, 'P0');
-  assert.match(alarm.reason, /not been read for 31 min — twenty 401: the key was refused/);
+  assert.match(alarm.reason, /not been read for 31 min — twenty 401: request refused — check the Twenty API key and Cloudflare Access policy/);
   assert.doesNotMatch(alarm.note, /does not interrupt/, 'it is in the default interrupt set');
   // Still down a minute later: the same outage, not a second alarm.
   r = await tick(40);
