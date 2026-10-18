@@ -346,7 +346,8 @@ test('config: unset is on only with a URL, a key and who Alice is; a typo is ref
   assert.throws(() => parseCrmProjects('Acme Corp'), /is not Company Name=project/);
   assert.throws(() => loadConfig({ ...base, TWENTY_CF_ACCESS_CLIENT_ID: 'id' }), /must be set together/);
   assert.throws(() => loadConfig({ ...base, TWENTY_CF_ACCESS_CLIENT_SECRET: 'secret' }), /must be set together/);
-  const access = loadConfig({ ...base, TWENTY_CF_ACCESS_CLIENT_ID: 'id', TWENTY_CF_ACCESS_CLIENT_SECRET: 'secret' }).crm;
+  assert.throws(() => loadConfig({ ...base, TWENTY_URL: 'http://crm.example.test', TWENTY_CF_ACCESS_CLIENT_ID: 'id', TWENTY_CF_ACCESS_CLIENT_SECRET: 'secret' }), /require an HTTPS TWENTY_URL/);
+  const access = loadConfig({ ...base, TWENTY_URL: 'https://crm.example.test', TWENTY_CF_ACCESS_CLIENT_ID: 'id', TWENTY_CF_ACCESS_CLIENT_SECRET: 'secret' }).crm;
   assert.equal(access.accessClientId, 'id');
   assert.equal(access.accessClientSecret, 'secret');
 });
