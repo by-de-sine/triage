@@ -74,6 +74,7 @@ no write path.
 |---|---|---|
 | `TRIAGE_CRM` | unset | `on` · `off` · `fake`. Unset: on if the three below are set. `fake` runs `test/fake-twenty.js`, where on the second read a colleague hands you a task (P0), rewords one you handed them (P1), and an unnamed key adds a note (P2) |
 | `TWENTY_URL` · `TWENTY_API_KEY` | — | where Twenty is, and a key from *Settings › APIs › API keys* bound to a **read-only** role. Read over GraphQL. Never an admin key: triage must not be able to write to the system of record |
+| `TWENTY_CF_ACCESS_CLIENT_ID` · `TWENTY_CF_ACCESS_CLIENT_SECRET` | — | optional Cloudflare Access service-token pair, sent only to `/graphql`. Set both when Access protects that path, and allow the token with a Service Auth policy for `/graphql`. Redirects are refused so the credentials are never forwarded to a login page |
 | `TRIAGE_CRM_ME` | — | you, as a workspace member: an id, email or full name, comma-separated. No default — a source that cannot recognise you reads all your own edits as somebody else's. An entry matching no member fails the read |
 | `TRIAGE_CRM_AGENTS` | — | the `updatedBy.name` your agents' API edits carry (their keys' names), comma-separated. Unset means you have no agents |
 | `TRIAGE_CRM_PROJECTS` | — | `Company Name=project`, comma-separated, so preferences and interrupt statements can scope to a company |
