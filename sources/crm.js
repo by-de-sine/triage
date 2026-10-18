@@ -197,6 +197,12 @@ export default {
   async whoami({ api, self = [], agents = [] }) {
     const members = (await api.members()).rows;
     const ids = resolveSelf(self, members);
+    // `resolveSelf` trusts an id it cannot see, which is right for the poll
+    // (the id is compared with ids) and wrong here (a name is needed, and
+    // there is none): an identity quietly short of a member would file that
+    // member's own edits under "others" in every report. Say so instead.
+    const unseen = [...ids].filter((id) => !members.some((m) => m.id === id));
+    if (unseen.length) throw new Error(`TRIAGE_CRM_ME: ${unseen.join(', ')} is no member this key can see, so its name is unknown`);
     const names = members.filter((m) => ids.has(m.id)).map(memberName).filter(Boolean);
     return [...new Set([...names, ...agents])];
   },

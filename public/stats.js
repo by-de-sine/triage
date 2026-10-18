@@ -401,9 +401,13 @@ function drawChangelog(r) {
   const t = el('table');
   const tr = el('tr'); for (const h of ['when', 'item', 'where', 'who', 'what', 'verdict', 'you did']) tr.append(el('th', null, h)); t.append(tr);
   const name = (a) => (a.who === 'you' ? `${a.name} (you)` : a.who === 'bots' ? `${a.name} (bot)` : a.name);
+  // The moment in the report's zone, so the date a row shows is the date of
+  // the bucket it sits in — an evening event is still "yesterday" here.
+  const fmt = new Intl.DateTimeFormat('sv-SE', { timeZone: r.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  const when = (e) => (e.last ? fmt.format(new Date(e.last)) : e.bucket);
   for (const e of rows) {
     const row = el('tr', e.interrupted ? 'interrupted' : null);
-    row.append(el('td', null, (e.last || e.bucket).slice(0, 16).replace('T', ' ')));
+    row.append(el('td', null, when(e)));
     const td = el('td'); const a = el('a', null, e.title || e.item_key || String(e.item_id)); if (e.url) { a.href = e.url; a.target = '_blank'; a.rel = 'noopener'; } td.append(a); row.append(td);
     row.append(el('td', null, e.repo || e.source || '—'));
     row.append(el('td', null, e.actors.map(name).join(', ') || '—'));

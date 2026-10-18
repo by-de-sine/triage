@@ -82,6 +82,7 @@ test('whoami is every name you act under: the member names TRIAGE_CRM_ME resolve
   assert.deepEqual(await crm.whoami({ api: fakeTwenty(), self: [ALICE], agents: ['Agent key', 'agent key'] }), ['Alice Example', 'Agent key', 'agent key'], 'an id resolves to the name; the keys are passed as typed');
   assert.deepEqual(await crm.whoami({ api: fakeTwenty(), self: SELF, agents: [] }), ['Alice Example']);
   await assert.rejects(crm.whoami({ api: fakeTwenty(), self: ['nobody@example.test'], agents: AGENTS }), /is no workspace member/, 'an owner it cannot recognise is an error, like the poll');
+  await assert.rejects(crm.whoami({ api: fakeTwenty(), self: ['0c7d9d0e-1111-4222-8333-444444444444'], agents: AGENTS }), /is no member this key can see/, 'an id the poll would trust has no name here, and silence would file that member under "others"');
   await assert.rejects(crm.whoami({ api: fakeTwenty(world(), { fail: 'down' }), self: SELF, agents: AGENTS }), 'a CRM that is down cannot say');
 });
 
