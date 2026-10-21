@@ -275,6 +275,15 @@ main { max-width: 1100px; margin: 0 auto; padding: 22px 28px 40px; display: grid
 .chart th:first-child, .chart td:first-child { text-align: left; }
 .chart th { color: var(--ink-3); font-weight: 500; }
 .chart .tablewrap { max-height: 260px; overflow: auto; }
+/* The changelog's table is the chart, so it gets the height a day's reading
+   needs, its text columns read left to right, and a row that reached Slack
+   carries the alarm colour in its margin. */
+.chart .tablewrap.log { max-height: 70vh; }
+.chart .tablewrap.log th, .chart .tablewrap.log td { text-align: left; white-space: normal; }
+.chart .tablewrap.log td:nth-child(2) { max-width: 28ch; }
+.chart .tablewrap.log td a { color: var(--ink-2); text-decoration: none; }
+.chart .tablewrap.log td a:hover { color: var(--teal-2); text-decoration: underline; }
+.chart .tablewrap.log tr.interrupted td:first-child { box-shadow: inset 3px 0 var(--crimson); }
 .chart .empty { color: var(--ink-3); font-size: 12.5px; padding: 18px 0; text-align: center; }
 .chart .thin { font: 11.5px var(--mono); color: var(--copper-2); }
 .tip { position: fixed; z-index: 40; pointer-events: none; background: var(--ink); color: var(--paper); border-radius: 8px; padding: 7px 10px; font: 11.5px/1.5 var(--mono); box-shadow: var(--shadow); max-width: 280px; }

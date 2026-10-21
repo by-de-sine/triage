@@ -76,6 +76,13 @@ now. One window — 7, 30 or 90 days, or a year, by hour, day or week, in
   tail folded into `other` past seven.
 - **Response** — how long an item waited for your action, and an interrupt
   for your first, each with its sample size.
+- **Changelog** — the window read back: one row per item per bucket that
+  moved, with who moved it (*you* is every name you act under on the
+  source, your agents included; bots; other people by name), what kind of
+  events, the strongest verdict in its own words, whether it reached
+  Slack, and what you did. This is where an agent's day of work is seen —
+  the interrupt path is for a person waiting on you, and your own agents
+  are not one.
 
 Every chart has a `json` link to its report; `export json` (or `e`) saves
-all four for the window as one file. See the [API](api.md#reports).
+all five for the window as one file. See the [API](api.md#reports).

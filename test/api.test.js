@@ -104,7 +104,10 @@ test('the API answers healthz, runs a source, lists items and decisions', async 
     assert.equal(big.status, 413);
     // Plan §15: the reports, over a window, in the zone the app was given.
     r = await get('/api/reports');
-    assert.deepEqual(Object.keys(r.body.reports), ['flow', 'when', 'where', 'response']);
+    assert.deepEqual(Object.keys(r.body.reports), ['flow', 'when', 'where', 'response', 'changelog']);
+    r = await get('/api/reports/changelog?since=2026-09-01T00:00:00Z');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.totals.items >= 1, 'the fake thread moved in the window');
     // A window pinned at its start and open at its end — it holds the fake
     // thread's September events and the Done just pressed, whatever today is.
     r = await get('/api/reports/flow?since=2026-09-01T00:00:00Z');
