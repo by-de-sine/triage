@@ -49,6 +49,7 @@ says).
 | **Mute** | `state = muted`: still tiered and logged, never delivered, never reopened |
 | **Reopen** (`open`) | back to open with a fresh rank — the undo for the four above. On the page and the API, not a Slack button. (The **Open** button is a link to the thread) |
 | **Answer** | `{action: "answer", choice: "B"}` — for an item that carries choices, like a [ledger](sources/ledger.md#asking-through-the-ledger) `[confirm: …]` row. `state = done`, and the choice is on the action row for whoever asked to read back. A wrong letter is refused with the list |
+| **Seen** | `{action: "seen"}` — nothing changes; a row says you looked, and when. For a surface that presents an item without owning it (an attention report that lists the item with a tick beside it) to record the tick where the [response and changelog reports](#reports) read it. The item stays where it was: Done is for handled, Seen is for "I know". Not a button on the page or in Slack |
 
 The system's own moves are actions too: `wake` when a snooze ends,
 `reopen` when a done item draws new activity, and `resolved`

@@ -85,6 +85,25 @@ const batch = (events, over = {}) => ({ item: { key: 'o/r#1', kind: 'pull', titl
 const ev = (key, kind, actor, ts, over = {}) => ({ key, kind, actor, ts, body: '', data: {}, ...over });
 class FakeDeliver { constructor() { this.calls = []; } async deliver(x) { this.calls.push(x); return { delivered: true, note: 'sent D1 1.0' }; } }
 
+test('seen changes nothing but writes the row, by whoever ticked', async () => {
+  const store = new Store();
+  const item = seed(store);
+  const reflected = [];
+  const act = createActor({ store, marks: marksFor(fakeGithub()), deliver: { reflect: async (r) => reflected.push(r) }, now: () => NOW });
+  const r = await act({ id: item.id, action: 'seen', by: 'seat' });
+  assert.equal(r.item.state, 'open');
+  assert.equal(r.item.score, item.score, 'the rank is untouched');
+  assert.equal(r.marked, null, 'nothing is marked at the far end');
+  const [a] = store.actionsFor(item.id);
+  assert.deepEqual([a.action, a.by, a.until, a.data], ['seen', 'seat', null, {}]);
+  assert.equal(reflected[0].action, 'seen', 'a DM that carried the item is told');
+  // A second look is a second row; a Later item stays later.
+  await act({ id: item.id, action: 'later' });
+  await act({ id: item.id, action: 'seen' });
+  assert.equal(store.item(item.id).state, 'later');
+  assert.deepEqual(store.actionsFor(item.id).map((x) => x.action), ['seen', 'later', 'seen']);
+});
+
 test('a snooze that has passed wakes on the next poll and re-delivers at its tier, however old the event', async () => {
   const store = new Store();
   const d = new FakeDeliver();
