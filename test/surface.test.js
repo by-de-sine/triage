@@ -28,22 +28,35 @@ function fakeApp() {
   };
 }
 /** The web-api methods the app path calls. `threadFails` answers a reply as
- *  Slack does when the DM it names is gone. */
+ *  Slack does when the DM it names is gone; `failUpdates` and `failHomes`
+ *  fail that many of the next calls, as a rate limit would. */
 function fakeClient({ threadFails = false } = {}) {
   const calls = [];
+  const apiError = (error) => Object.assign(new Error(`An API error occurred: ${error}`), { data: { error } });
   let n = 0;
-  return {
-    calls,
+  const c = {
+    calls, failUpdates: 0, failHomes: 0,
     chat: {
       postMessage: async (m) => {
         calls.push(['post', m]);
-        if (m.thread_ts && threadFails) throw Object.assign(new Error('An API error occurred: thread_not_found'), { data: { error: 'thread_not_found' } });
+        if (m.thread_ts && threadFails) throw apiError('thread_not_found');
         return { ok: true, channel: 'D1', ts: `${++n}.0` };
       },
-      update: async (m) => { calls.push(['update', m]); return { ok: true }; },
+      update: async (m) => {
+        calls.push(['update', m]);
+        if (c.failUpdates > 0) { c.failUpdates--; throw apiError('ratelimited'); }
+        return { ok: true };
+      },
     },
-    views: { publish: async (v) => { calls.push(['home', v]); return { ok: true }; } },
+    views: {
+      publish: async (v) => {
+        calls.push(['home', v]);
+        if (c.failHomes > 0) { c.failHomes--; throw apiError('ratelimited'); }
+        return { ok: true };
+      },
+    },
   };
+  return c;
 }
 function setup({ client = {}, ...over } = {}) {
   const store = new Store();
@@ -203,6 +216,38 @@ test('new activity reopens a done item: the DM follows, with buttons and what re
   assert.match(contextText(m), /since: `P1`/);
 });
 
+test('reopened by a P0 inside the coalesce window: the silent update says what reopened it too', async () => {
+  const s = setup();
+  const item = await poll(s);
+  await s.app.fire('action', 'act:done', press(s, 'act:done', item.id));
+  s.clock.tick(60_000);
+  const r = await poll(s, { id: 'c2', body: '@alice sorry, one more' });
+  assert.equal(s.store.item(r.id).state, 'open');
+  assert.equal(slackCalls(s).filter(([k]) => k === 'post').length, 1, 'no reply inside the window');
+  const [kind, m] = slackCalls(s).at(-1);
+  assert.deepEqual([kind, m.ts], ['update', '1.0']);
+  assert.match(m.blocks[1].text.text, /one more/);
+  assert.match(contextText(m), /↺ reopened by new activity/);
+  assert.equal(m.blocks.at(-1).type, 'actions');
+});
+
+test('a follow-up whose DM could not be redrawn is still delivered, and the DM is drawn again', async () => {
+  for (const quiet of ['', '12:30-13:00']) {
+    const s = setup({ quiet });
+    const item = await poll(s);                                 // 12:05, sent
+    s.clock.tick(30 * 60_000);
+    s.client.failUpdates = 1;
+    await poll(s, { id: 'c2', body: '@alice ping again' });     // 12:35: folded, or held by quiet
+    if (quiet) { s.clock.tick(30 * 60_000); assert.equal(await s.d.flush(), 1); }
+    const label = quiet ? 'flushed' : 'polled';
+    assert.match(s.store.decisions({ item_id: item.id })[0].note, /^followed up in D1 1.0 \(reply 2.0\)/, label);
+    const updates = slackCalls(s).filter(([k]) => k === 'update');
+    assert.equal(updates.length, 2, `${label}: the redraw that failed, and the one after it`);
+    assert.deepEqual([updates[1][1].ts, updates[1][1].blocks.at(-1).type], ['1.0', 'actions'], label);
+    assert.match(updates[1][1].blocks[1].text.text, /ping again/, label);
+  }
+});
+
 test('a newer verdict that does not interrupt is a since: line, not new words, and not a message', async () => {
   const s = setup();
   const item = await poll(s);
@@ -274,6 +319,15 @@ test('the Home tab is redrawn on the tick once a quarter of an hour has passed, 
   s.clock.tick(15 * 60_000);
   assert.equal((await s.d.tick()).home, true);
   assert.equal(homes(s).length, 2);
+});
+
+test('a Home tab that failed to publish is tried again on the next tick, not a quarter of an hour later', async () => {
+  const s = setup();
+  s.client.failHomes = 1;
+  await assert.rejects(s.d.refreshHome(), /ratelimited/);
+  assert.equal((await s.d.tick()).home, true);
+  assert.equal(homes(s).length, 2);
+  assert.equal((await s.d.tick()).home, false, 'drawn now, so not again');
 });
 
 test('the Home tab is never drawn for the webhook, or without the app\'s handlers', async () => {

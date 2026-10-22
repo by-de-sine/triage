@@ -170,7 +170,10 @@ export class SlackDelivery {
     const prev = this.locks.get(itemId) || Promise.resolve();
     const next = prev.catch(() => {}).then(fn);
     this.locks.set(itemId, next);
-    next.finally(() => { if (this.locks.get(itemId) === next) this.locks.delete(itemId); });
+    // Both ways, so the cleanup is never a second, unhandled copy of a
+    // failure the caller already answers — Node exits on one of those.
+    const done = () => { if (this.locks.get(itemId) === next) this.locks.delete(itemId); };
+    next.then(done, done);
     return next;
   }
 
@@ -335,7 +338,8 @@ export class SlackDelivery {
     // and `deliver` has already held the repeats that would have folded.
     const last = this.webhook ? null : this.store.lastSent(item.id);
     if (last && now - Date.parse(last.ts) < this.coalesceMs) {
-      await this.#serial(item.id, () => this.client.chat.update({ channel: last.channel, ts: last.message_ts, ...msg }));
+      const body = this.#parent(item, decision, msg);
+      await this.#serial(item.id, () => this.client.chat.update({ channel: last.channel, ts: last.message_ts, ...body }));
       this.drawn.delete(`${last.channel} ${last.message_ts}`);
       this.store.updateDelivery(last.id, { message_ts: last.message_ts, status: 'sent', decision_id: decision.id }, now.toISOString());
       this.#homeSoon();
@@ -378,14 +382,13 @@ export class SlackDelivery {
     let r;
     try { r = await this.client.chat.postMessage({ channel: last.channel, thread_ts: last.message_ts, reply_broadcast: true, ...reply, unfurl_links: false }); }
     catch (e) { this.log(`slack: ${item.key}: could not reply to ${last.channel} ${last.message_ts} (${e.data?.error || e.message}) — posting fresh`); return null; }
-    // The DM, drawn as every redraw is — from the item's state, so a wake or
-    // a reopen says so above the buttons — once the decision is the store's;
-    // a decision only the caller holds is drawn as it was handed over.
-    const stored = this.store.decisionsFor(item.id).some((d) => d.id === decision.id);
-    const parent = stored ? itemMessage(this.store, this.store.item(item.id) || item, decision.id) : msg;
+    const parent = this.#parent(item, decision, msg);
     this.drawn.delete(`${last.channel} ${last.message_ts}`);
+    // The reply went out, so this is delivered either way; a DM that could
+    // not be redrawn says so in `drawn`, and `moved` tries it again.
+    let drawn = true;
     try { await this.#serial(item.id, () => this.client.chat.update({ channel: last.channel, ts: last.message_ts, ...parent })); }
-    catch (e) { this.log(`slack: ${item.key}: could not redraw ${last.channel} ${last.message_ts} — ${e.data?.error || e.message}`); }
+    catch (e) { drawn = false; this.log(`slack: ${item.key}: could not redraw ${last.channel} ${last.message_ts} — ${e.data?.error || e.message}`); }
     const nowIso = now.toISOString();
     this.store.updateDelivery(last.id, { message_ts: last.message_ts, status: 'sent', decision_id: decision.id }, nowIso);
     const held = this.store.heldDeliveries().find((d) => d.item_id === item.id) || null;
@@ -393,7 +396,16 @@ export class SlackDelivery {
     if (held) this.store.updateDelivery(held.id, row, nowIso);
     else this.store.addDelivery({ item_id: item.id, ...row }, nowIso);
     this.#homeSoon();
-    return { delivered: true, note: `followed up in ${last.channel} ${last.message_ts} (reply ${r.ts})` };
+    return { delivered: true, drawn, note: `followed up in ${last.channel} ${last.message_ts} (reply ${r.ts})` };
+  }
+
+  /** The DM an interrupt writes, drawn as every redraw is — from the item's
+   *  state, so a wake or a reopen says so above the buttons — once the
+   *  decision is the store's; a decision only the caller holds is drawn as
+   *  it was handed over. */
+  #parent(item, decision, msg) {
+    const stored = this.store.decisionsFor(item.id).some((d) => d.id === decision.id);
+    return stored ? itemMessage(this.store, this.store.item(item.id) || item, decision.id) : msg;
   }
 
   /** Redraw the item's DM from where the item stands now. Nothing when it
@@ -446,8 +458,10 @@ export class SlackDelivery {
   async refreshHome() {
     if (!this.home) return false;
     clearTimeout(this.homeTimer); this.homeTimer = null;
-    this.homeAt = this.now().getTime();
     await this.handlers.publishHome(this.client, this.userId);
+    // Only once it is drawn: a publish that failed leaves the next tick to
+    // try again rather than waiting out the fifteen minutes.
+    this.homeAt = this.now().getTime();
     return true;
   }
 
@@ -515,6 +529,7 @@ export class SlackDelivery {
       try {
         const r = await this.send({ item, decision, event }, now);
         if (decision) this.store.markDelivered(decision.id, true, r.note + why);
+        if (r.drawn === false) await this.moved({ item });
         n++;
       } catch (e) {
         this.store.updateDelivery(d.id, { status: 'failed', decision_id: d.decision_id, error: e.message }, now.toISOString());
