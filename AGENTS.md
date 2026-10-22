@@ -21,12 +21,11 @@ Instructions for agents working in this repository.
   (`TRIAGE_DB`) and port (`TRIAGE_PORT`, on 127.0.0.1). Never edit the
   checkout production runs from. How a worktree is published (a hostname,
   a proxy, a unit) belongs to the box, not this repo.
-- **Slack is off in every worktree: no `SLACK_` line of any kind** in its
-  `.env`. A webhook URL posts to the real channel from a branch; a token
-  opens a second Socket Mode connection that receives every button press.
-  Prove delivery against a loopback listener
-  ([CONTRIBUTING.md](CONTRIBUTING.md#proving-delivery)). Only production
-  talks to Slack.
+- **A worktree may talk to Slack** — a development app, or production's
+  own. A Slack mishap is noise, not damage, and an app or a webhook can be
+  switched off the moment it annoys. A development app keeps the
+  worktree's button presses its own
+  ([CONTRIBUTING.md](CONTRIBUTING.md#proving-delivery)).
 - **A worktree reads your real GitHub** with the token production uses, and
   Done on its page marks the real thread read. Press Done only when you
   mean it, and leave `TRIAGE_GITHUB_ALL` unset — a full read can spend the

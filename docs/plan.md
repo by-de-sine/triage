@@ -1704,6 +1704,14 @@ answered by a fresh post. **The Home tab** is republished, debounced, when
 the lists change, every fifteen minutes for the time terms, and at boot.
 `/triage` matches `/triage-*` too, so a development app needs no setting.
 
+*Changed 2026-10-22: a worktree may talk to Slack.* The rule that kept
+every `SLACK_` line out of a worktree's `.env` is gone (AGENTS.md). A Slack
+mishap is noise rather than damage, there is one Slack and no sandbox, and
+an app or a webhook can be switched off by the workspace admin the moment
+it annoys. A development app made from the same manifest is the suggested
+way, because Socket Mode splits one app's events between its connections;
+production's own tokens are allowed too.
+
 The dependencies are already lazy (§16.2): the two imports are dynamic and
 sit behind `TRIAGE_SLACK=app`, so `npm run demo` and `npm test` need no
 `node_modules`. No change to `package.json` is needed for that; `npm ci`

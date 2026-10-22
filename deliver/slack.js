@@ -458,9 +458,10 @@ export class SlackDelivery {
   async refreshHome() {
     if (!this.home) return false;
     clearTimeout(this.homeTimer); this.homeTimer = null;
-    await this.handlers.publishHome(this.client, this.userId);
-    // Only once it is drawn: a publish that failed leaves the next tick to
-    // try again rather than waiting out the fifteen minutes.
+    // A publish that failed leaves the next tick to try again, rather than
+    // waiting out the fifteen minutes since the last one that worked.
+    try { await this.handlers.publishHome(this.client, this.userId); }
+    catch (e) { this.homeAt = 0; throw e; }
     this.homeAt = this.now().getTime();
     return true;
   }

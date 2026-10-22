@@ -142,10 +142,8 @@ change wants (`TRIAGE_DEMO=1` turns on all six):
 
 ### Proving delivery
 
-**Never point a development instance at a real Slack or Discord.** Two
-instances on one webhook post everything twice; two on one Slack app both
-receive every button press. Prove delivery against a listener you start
-yourself — what it prints is byte for byte what the far end would receive:
+A webhook's payload is easiest to read off a listener you start yourself
+— what it prints is byte for byte what the far end would receive:
 
 ```bash
 node -e "require('http').createServer((q,s)=>{let b='';q.on('data',c=>b+=c);q.on('end',()=>{console.log(b);s.end('ok')})}).listen(3398)"
@@ -158,7 +156,25 @@ TRIAGE_DELIVER_MAX_AGE_H=168                    # optional: let the last week's 
 ```
 
 `GET /api/decisions` shows what was sent, held or not delivered, and why.
-The Slack app's Bolt wiring can only be exercised against a real app.
+
+The Slack app's Bolt wiring can only be exercised against a real app, and a
+worktree may use one. A **development app** made from
+[`slack/manifest.yml`](slack/manifest.yml), with its name and slash command
+changed (`/triage-dev` — `/triage` answers to `/triage-*`), is the clean
+way: its DMs and button presses are the worktree's alone. Its three values
+go in the worktree's `.env`:
+
+```bash
+TRIAGE_SLACK=app
+SLACK_BOT_TOKEN=xoxb-…    # the development app's
+SLACK_APP_TOKEN=xapp-…
+SLACK_USER_ID=U…
+```
+
+Production's own app or webhook works too, with two costs: a webhook shared
+by two instances posts everything twice, and Socket Mode hands each event to
+one of the connections open on an app, so a press on production's DM may
+land on the worktree instead.
 
 ### Would that have been P0?
 

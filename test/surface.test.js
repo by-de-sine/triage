@@ -328,6 +328,11 @@ test('a Home tab that failed to publish is tried again on the next tick, not a q
   assert.equal((await s.d.tick()).home, true);
   assert.equal(homes(s).length, 2);
   assert.equal((await s.d.tick()).home, false, 'drawn now, so not again');
+  // And after one that worked: a later failure does not wait out the quarter.
+  s.clock.tick(60_000);
+  s.client.failHomes = 1;
+  await assert.rejects(s.d.refreshHome(), /ratelimited/);
+  assert.equal((await s.d.tick()).home, true);
 });
 
 test('the Home tab is never drawn for the webhook, or without the app\'s handlers', async () => {

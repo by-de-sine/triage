@@ -3,6 +3,8 @@
 # After creating: Basic Information → App-Level Tokens → Generate, scope
 # connections:write (SLACK_APP_TOKEN, xapp-…); Install to Workspace
 # (SLACK_BOT_TOKEN, xoxb-…); your member id from your profile (SLACK_USER_ID).
+# A development app is this file with the name, the bot's display name and
+# the slash command changed (`triage-dev`, `/triage-dev`).
 display_information:
   name: triage
   description: your queue, tiered
