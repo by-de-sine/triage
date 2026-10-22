@@ -174,7 +174,11 @@ SLACK_USER_ID=U…
 Production's own app or webhook works too, with two costs: a webhook shared
 by two instances posts everything twice, and Socket Mode hands each event to
 one of the connections open on an app, so a press on production's DM may
-land on the worktree instead.
+land on the worktree instead. The worktree acts on it — on *its* item of
+that id, which may be another thread altogether — so with a real GitHub
+token, a Done pressed on production's DM can mark a different real thread
+read. Pair production's tokens with `TRIAGE_GITHUB=fake`, or use the
+development app.
 
 ### Would that have been P0?
 
