@@ -124,7 +124,8 @@ needed until milestone 3.
   tests with no `node_modules` at all.)*
 - **Repo `acme/triage`**, public is fine (no secrets in it, ever). *Moved
   2026-10-15 to an organisation's `triage` with a second reader; still
-  private, and §16.7 item d is the licence for the day that changes.*
+  private, and §16.7 item d is the licence for the day that changes. Public
+  since 2026-10-16; the licence landed 2026-10-27.*
   Laid out per the host's own docs: `~/src/triage/.bare`, `main/`, one worktree
   per task.
 - **Runs on the host as a user systemd unit** from `~/src/triage/main`;
@@ -1719,7 +1720,9 @@ is said.
 - **(d) The licence.** *Default, recommended:* MIT, added the day the
   repository goes public, as a `LICENSE` file and the one word in
   `package.json`. The plan names it; no file lands before that day, and
-  nothing in this section makes the repository public.
+  nothing in this section makes the repository public. *Landed 2026-10-27:
+  `LICENSE` and `"license": "MIT"`, eleven days after the repository went
+  public on 2026-10-16; `"private": true` left with it.*
 - **(e) The webhook variable.** *Built in G2:* `TRIAGE_WEBHOOK_URL`, with
   `SLACK_WEBHOOK_URL` read as an alias for as long as a `.env` carries it.
 - **(f) Whether `npm run demo` must work with no install.** *Yes, and it
