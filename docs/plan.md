@@ -1722,7 +1722,9 @@ is said.
   `package.json`. The plan names it; no file lands before that day, and
   nothing in this section makes the repository public. *Landed 2026-10-27:
   `LICENSE` and `"license": "MIT"`, eleven days after the repository went
-  public on 2026-10-16; `"private": true` left with it.*
+  public on 2026-10-16. `"private": true` stays: it means "never publish to
+  npm", which is still true of an application, and says nothing about who
+  may read the tree.*
 - **(e) The webhook variable.** *Built in G2:* `TRIAGE_WEBHOOK_URL`, with
   `SLACK_WEBHOOK_URL` read as an alias for as long as a `.env` carries it.
 - **(f) Whether `npm run demo` must work with no install.** *Yes, and it
