@@ -66,7 +66,11 @@ test('rrule: daily with COUNT, weekly by day with UNTIL and an EXDATE, monthly b
 test('an open-ended rule from years ago still reaches today, without walking every occurrence since', () => {
   const t = NOW.getTime();
   const tenYears = new Date(t - 3650 * DAY);
-  const dtstart = { y: tenYears.getUTCFullYear(), mo: tenYears.getUTCMonth() + 1, d: tenYears.getUTCDate(), h: 9, mi: 0, s: 0 };
+  // The day of the month is clamped to 28: a MONTHLY rule from the 29th, 30th
+  // or 31st skips the months that lack that day (RFC 5545 §3.3.10), and on the
+  // days when ten years ago fell on a 31st the 40-day window below found no
+  // occurrence at all (2026-10-28, the first run of CI).
+  const dtstart = { y: tenYears.getUTCFullYear(), mo: tenYears.getUTCMonth() + 1, d: Math.min(tenYears.getUTCDate(), 28), h: 9, mi: 0, s: 0 };
   const range = { fromMs: t - DAY, toMs: t + 2 * DAY };
   const daily = expandRrule(parseRrule('FREQ=DAILY'), dtstart, 'America/New_York', range);
   assert.ok(daily.length >= 2 && daily.length <= 4, `a daily standup from ten years ago has its occurrences around today (${daily.length})`);

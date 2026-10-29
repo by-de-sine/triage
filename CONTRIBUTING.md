@@ -1,17 +1,22 @@
 # Contributing
 
-How to work on triage. What it does is in the [README](README.md) and
-[docs/](docs/); how it is built is [architecture](docs/architecture.md);
-what is still intended is the [plan](docs/plan.md).
+How to work on triage, for a person or for their agent. What it does is in
+the [README](README.md) and [docs/](docs/); how it is built is
+[architecture](docs/architecture.md); what is still intended is the
+[plan](docs/plan.md); what it holds and what a pull request can reach is
+[SECURITY.md](SECURITY.md). An agent working in a checkout starts at
+[AGENTS.md](AGENTS.md), which is this file's rules in the short form.
 
 ## Setup
 
-Node ≥ 24 and nothing else. `npm ci` is only needed to run the Slack app
-path (`TRIAGE_SLACK=app`); the tests, the demo and a webhook-delivering
-server all run without `node_modules`.
+Node ≥ 24 (`.node-version` says which, for `nvm`, `fnm` and CI) and
+nothing else. `npm ci` is only needed to run the Slack app path
+(`TRIAGE_SLACK=app`); the tests, the demo and a webhook-delivering server
+all run without `node_modules`.
 
 ```bash
 npm test          # node --test: in-memory store, every source faked, no network, under a second
+TZ=UTC npm test   # the same in the zone CI also uses — a due date is a local day
 npm run demo      # every source on its fake at http://127.0.0.1:3300
 ```
 
@@ -61,6 +66,45 @@ new thing's name.
 
 A change that crosses a seam changes the design, and goes in
 [`docs/plan.md`](docs/plan.md) first.
+
+## Adding a source
+
+The most common change, and the one the tree is shaped for. Read
+[architecture § Source](docs/architecture.md#source) for the contract, pick
+the existing source nearest to yours — the ledger and Home Assistant for
+state (a list that is read whole each time), the forges for a feed (events
+that happened), the calendar for both — and then, in order:
+
+1. **`sources/<name>.js`** — `name`, `every`, `describe` and `poll(ctx)`;
+   `reconcile` if the far end is state; `mark` if Done should do something
+   there; `whoami`, `project`, `time`, `due` as the item needs them. It owns
+   its cursor and never writes to the store.
+2. **`rules/<name>.js`** — an ordered array of named rules, each pure, each
+   returning a reason or null. The first that fires is the verdict.
+3. **`lib/config.js`** — a `TRIAGE_<NAME>` mode (`on | off | fake`) and the
+   source's variables, each with a default a stranger's box could want; a
+   value it does not recognise fails the boot. `demoConfig` turns the mode
+   to `fake`.
+4. **`server.js`** — a `<name>Source(c, log)` that returns the client, the
+   fake, or null, and says at boot which of the three it is: "the source is
+   quiet" and "the source is off" look identical from a list page.
+5. **`test/fake-<name>.js`** — a real client over a fake far end where it
+   matters (the fake CRM pages for real; the fake Home Assistant mutates
+   its lists, so Done and reconcile are exercised), with a `demo<Name>()`
+   for `TRIAGE_DEMO=1`. Every fake title says `(fake)`.
+6. **`test/<name>.test.js`**, the rules in `rules.test.js`, and the demo's
+   boot in `demo.test.js` — see [Tests](#tests) for which file each change
+   belongs in.
+7. **The docs:** `docs/sources/<name>.md` (what it reads, what Done does
+   there, every variable with its default), a section in `.env.example`,
+   a row in the README's table and in `docs/README.md`, and
+   `docs/configuration.md`'s index of where each variable is documented.
+
+The test the whole change has to pass is the one every source so far has
+passed: outside an API client for its far end (`lib/<name>-api.js`),
+nothing in `lib/` or `deliver/` says the new source's name. If the seam
+does not offer what you need, widen it for every source — a new optional
+member of the contract — rather than branching on yours.
 
 **There is no model here, and no seam for one** ([plan §13](docs/plan.md#13-the-reframe-that-removes-the-model-triage-is-a-source-not-a-mind)).
 The rank is the structural terms in `lib/rank.js`; `decisions` is what the
@@ -175,9 +219,31 @@ Done and reconcile are exercised for real.
 
 ## Pull requests
 
-Branch from the current `main`; one branch per task. The PR description
-says what shipped, what was decided and how it was verified.
+Branch from the current `main` — in a fork, if you are not a member of the
+organisation — one branch per task, `npm test` before every push. Open the
+pull request when the work is done and ready to be read. Its description
+says what shipped, what was decided along the way and how it was verified
+(the template under `.github/` asks for exactly that).
 
-**Merging deploys.** Anything a deploy needs first — a credential, a new
+What happens next, in order:
+
+1. **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the
+   suite in two zones, boots the demo with nothing installed, and installs
+   the lock file. **If you are not a member of the organisation, a
+   maintainer approves each run first.** The run would reach nothing — a
+   read-only token, no secrets, GitHub's own actions pinned to commits —
+   but a stranger's code runs after a person has read it, not before.
+   Approval is a reading, not a verdict.
+2. **CodeRabbit** reviews when a maintainer adds the `coderabbit` label,
+   and not otherwise; it answers only members of the organisation on a
+   thread. Members add the label once, as the last act, when nothing more
+   will be pushed — each push to a labelled pull request is another review
+   from a shared hourly quota — and answer what it finds in one push.
+3. **A maintainer reads it.** The seams above are what a review checks
+   first; a change that crosses one is sent to the plan rather than argued
+   on the pull request.
+
+**Merging deploys.** `main` is what the maintainer's own box runs, within
+minutes of a merge, so anything a deploy needs first — a credential, a new
 `.env` line, a manual step — goes at the top of the PR description, because
 nothing pauses to read it later. See [deploying](docs/deploy.md).

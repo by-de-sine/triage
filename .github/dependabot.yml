@@ -1,0 +1,20 @@
+# Dependabot keeps the two npm packages and the pinned actions current, one
+# grouped pull request a month each. Its pull requests run CI like any
+# other and are reviewed by a person; CodeRabbit sees them only if a
+# maintainer labels them (.coderabbit.yaml).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      slack:
+        patterns: ["@slack/*"]

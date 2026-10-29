@@ -6,6 +6,8 @@ Instructions for agents working in this repository.
   the seams, running an instance, proving delivery, where each test goes,
   the conventions. Read it first.
 - **What it does:** [README.md](README.md) and [docs/](docs/).
+- **What it holds and what a contributor can reach:**
+  [SECURITY.md](SECURITY.md).
 - **What is still intended:** [docs/plan.md](docs/plan.md). Sections 6
   (stack, repo, deployment), 7 (milestones) and 10 (decisions) are decided
   and are not re-litigated in a build session. Where the docs and the plan
@@ -35,6 +37,16 @@ Instructions for agents working in this repository.
 - **No model, no opinion in the store** — see
   [CONTRIBUTING.md](CONTRIBUTING.md#the-seams). A change that wants one
   goes to the plan first.
+- **`npm test` before every push, and CI green before anyone reads the
+  PR.** CI runs the suite in two zones (`TZ=UTC npm test` catches what
+  your zone hides), boots the demo with nothing installed, and installs
+  the lock file. The workflow is `.github/workflows/ci.yml`; it runs on
+  GitHub's own actions only, pinned to commits — do not add a third-party
+  action to it.
+- **CodeRabbit is spent on purpose.** Open a real pull request when the
+  work is done, and add the `coderabbit` label once, as the last act, when
+  nothing more will be pushed — every later push is another review from a
+  shared hourly quota. Fix what it finds in one push.
 - **Merging deploys.** Agents open the pull request; the owner merges it,
   and production follows within minutes. Anything a deploy needs first (a
   credential, a new `.env` line, a manual step) goes at the top of the PR

@@ -61,6 +61,8 @@ curl -X POST localhost:3300/api/items/12/act -H 'content-type: application/json'
 
 ## Reports
 
+![The stats page: open now, arrived, closed by you, resolved elsewhere, interrupts — and the flow charts beneath](images/stats.png)
+
 `/stats` is the store read over time, where the list is the store read
 now. One window — 7, 30 or 90 days, or a year, by hour, day or week, in
 `TRIAGE_TZ` — scopes every chart, each drawn beside its table:
