@@ -17,12 +17,16 @@ Triage runs on your own machine, as you, and reads the places your work
 waits with your credentials. So the thing worth protecting is the `.env`
 file, not the process:
 
-- **Every credential is in `~/.config/triage/.env`**, mode `0600`, in a
-  file it names beside it (the two the Google path mints, a per-owner
-  token in `TRIAGE_TOKENS_DIR`), or in the `gh` or `glab` store a forge
-  token is borrowed from when the `.env` names none. Nothing is read from
-  the repository, and nothing can be committed: `.gitignore` names them all
-  ([`.env.example`](.env.example) is the documented shape, with no values).
+- **Every credential is in `~/.config/triage/.env`**, which you keep at
+  mode `0600`, in a file it names beside it (the two the Google path
+  mints, a per-owner token in `TRIAGE_TOKENS_DIR`), or in the `gh` or
+  `glab` store a forge token is borrowed from when the `.env` names none.
+  Nothing is read from the repository. `.gitignore` names the defaults —
+  `.env`, the preferences file, the two Google files — so none of them can
+  be committed from a checkout; a tokens directory, or a credential file
+  you named yourself, belongs outside the checkout, where no `git add`
+  can reach it ([`.env.example`](.env.example) is the documented shape,
+  with no values).
 - **The tokens are read-mostly, and the writes are named.** GitHub's
   `notifications` scope, GitLab's `read_api` (plus `api` only if Done is to
   mark a todo done), a read-only CRM key, a calendar feed URL. The writes
@@ -38,8 +42,13 @@ file, not the process:
 - **What leaves the box** is one HTTP POST per interrupt to the webhook you
   configured, or a Socket Mode connection the Slack app opens outbound.
   The message carries the item's title, link and the rule that fired, and
-  nothing from your `.env`. Logs name a feed's host, never its URL, and
-  never a token.
+  the one line that says why — a comment's first line, a meeting's
+  location and guests; the generic shape also carries the item's data and
+  the event's body cut at 600 characters, because the endpoint is yours
+  to render. That is private work, so it goes only to the endpoint you
+  named, over https unless the endpoint is loopback, and never follows a
+  redirect. Nothing from your `.env` is ever in it. Logs name a feed's
+  host, never its URL, and never a token.
 - **Two dependencies**, both from Slack, both loaded only under
   `TRIAGE_SLACK=app`; the tests and the demo run with no `node_modules`.
   Dependabot keeps them and the pinned CI actions current.

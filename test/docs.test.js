@@ -35,7 +35,8 @@ test('every relative link in the Markdown names a file that exists', () => {
       if (external(target)) continue;
       const rel = target.split('#')[0];
       if (!rel) continue;
-      const resolved = path.resolve(path.dirname(file), decodeURIComponent(rel));
+      // A leading slash is the repository root, as GitHub renders it.
+      const resolved = rel.startsWith('/') ? path.join(root, decodeURIComponent(rel)) : path.resolve(path.dirname(file), decodeURIComponent(rel));
       if (!existsSync(resolved)) broken.push(`${path.relative(root, file)} → ${target}`);
     }
   }
