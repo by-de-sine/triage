@@ -133,6 +133,14 @@ needed until milestone 3.
   repository, because the deployment is machine meta-work — the
   one deliberate deviation from the services doctrine, since unlike its other services
   the code *is* developed. Deploy is `AGENTS.md` §Deploy.
+- **CI** *(added 2026-10-28, the repository being public with a second
+  reader and open to strangers):* `.github/workflows/ci.yml`, on GitHub's
+  runners, GitHub's own actions pinned to commits and nothing else — the
+  suite in two zones, the demo booting with no `node_modules`, the lock
+  file installing. A fork's run waits for a maintainer and reaches nothing;
+  `main` takes only pull requests whose checks passed. CodeRabbit reviews on
+  the `coderabbit` label, for members only. `SECURITY.md` is the policy and
+  says why each of those is so.
 - **HTTP API**, bound to 127.0.0.1, published by Caddy at
   its hostname. The surface is `docs/api.md`; it is
   what Claude Code sessions and the chief-of-staff seat (§13) use.

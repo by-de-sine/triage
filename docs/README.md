@@ -23,6 +23,7 @@ Start with the [README](../README.md) for what triage is and how to run it.
 
 - [Deploying](deploy.md)
 - [Architecture](architecture.md) — the four seams, the source contract, the store
-- [Contributing](../CONTRIBUTING.md)
+- [Contributing](../CONTRIBUTING.md) — and [AGENTS.md](../AGENTS.md), the short version for an agent
+- [Security](../SECURITY.md) — what triage holds, what a contributor can reach, reporting a vulnerability
 - [History](history.md) — how it got its shape
 - [The plan](plan.md) — what is still intended, and why things are the way they are

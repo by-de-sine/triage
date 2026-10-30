@@ -1,0 +1,99 @@
+# ci — what every pull request, and every push to main, is checked against.
+#
+# The repository is public, so the workflow is written so that a stranger's
+# pull request can run it and reach nothing:
+#   - `pull_request`, never `pull_request_target`: a fork's code runs in the
+#     fork's own context, with a read-only token and none of the secrets;
+#   - `permissions` is `contents: read` for the whole workflow, and no job
+#     raises it;
+#   - every action is pinned to a full commit SHA, the tag beside it for the
+#     reader (Dependabot moves both together);
+#   - nothing from the event — a title, a branch name, a body — reaches a
+#     shell;
+#   - no cache, no artifact, no self-hosted runner, no third-party action.
+# The other half is the repository's settings: a workflow from a fork waits
+# for a maintainer's approval before its first run. SECURITY.md has both.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    # No `npm ci` here on purpose: the suite runs with no node_modules, and
+    # not installing is the proof. Two zones, because a due date is a local
+    # day and the tests derive their dates from now (CONTRIBUTING.md § Tests).
+    name: test (${{ matrix.tz }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [UTC, America/Vancouver]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: npm test
+
+  demo:
+    # The README's promise, kept by a machine: a stranger with nothing sees
+    # the demo in a minute. Every source on its fake, delivery off, nothing
+    # leaves the runner.
+    name: demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: boot the demo and read /healthz
+        env:
+          TRIAGE_DEMO: '1'
+          TRIAGE_PORT: '3300'
+        run: |
+          node server.js &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3300/healthz > healthz.json && break
+            sleep 1
+          done
+          node -e '
+            const h = JSON.parse(require("fs").readFileSync("healthz.json", "utf8"));
+            if (!h.ok || !h.sources || h.failing.length) { console.error(h); process.exit(1); }
+            console.log(`ok — ${h.sources} sources, ${h.items} items, nothing failing`);
+          '
+
+  install:
+    # The lock file, for the one path that needs it (TRIAGE_SLACK=app) and
+    # for a deploy, which runs `npm ci` when the lock file changed.
+    # `--ignore-scripts`: a change to the lock file must not get to run
+    # anything here, and the two packages need no script.
+    name: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: npm ci --ignore-scripts
+      - run: node -e 'import("@slack/bolt").then(() => console.log("the app path resolves"))'

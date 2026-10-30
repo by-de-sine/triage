@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit reads this file from the branch under review, so what it says
+# is the maintainers' policy, not a wall: a pull request could carry a
+# different copy. The wall is the same three settings as the organisation's
+# global overrides in CodeRabbit's own dashboard, which no branch can change
+# (SECURITY.md § What a contributor can reach).
+reviews:
+  profile: chill
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    # A review is spent on purpose. Nothing is reviewed until a maintainer
+    # adds the `coderabbit` label — adding a label takes write access, which
+    # a fork's author does not have — and a draft is never reviewed. Pushes
+    # to a labelled pull request get incremental reviews, so the label goes
+    # on once, as the last act, when nothing more will be pushed.
+    enabled: false
+    labels: [coderabbit]
+    drafts: false
+  path_filters:
+    - "!public/fonts/**"
+    - "!package-lock.json"
+chat:
+  # Only members of the organisation may talk to CodeRabbit on this
+  # repository's pull requests and issues.
+  allow_non_org_members: false
+knowledge_base:
+  # What CodeRabbit learns here stays here. The organisation's other
+  # repositories are private, and nothing learned in them may surface in a
+  # public review.
+  learnings:
+    scope: local

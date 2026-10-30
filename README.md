@@ -7,6 +7,8 @@ you, and shows everything as one ordered list. The few things that cannot
 wait (someone replied to you, asked for your review, a meeting starts in
 fifteen minutes) reach you in Slack within a minute.
 
+![The list: every open item in rank order, each with Open, Done, Snooze, Later and Mute](docs/images/list.png)
+
 - **Deterministic.** Rules, not a model. Every verdict is logged with the
   rule that made it, so you can always ask why something is where it is —
   or why it did or did not interrupt you.
@@ -25,7 +27,8 @@ npm test         # under a second, no network
 ```
 
 No `npm install` needed: the only dependencies are for the optional Slack
-app.
+app. The demo is what the screenshot above shows — every source on its
+fake, delivery off, nothing leaves your machine.
 
 ## Use it
 
@@ -45,6 +48,10 @@ app.
    A Discord webhook or any endpoint that takes JSON works too.
 
 Everything else is optional — see [configuration](docs/configuration.md).
+Your credentials live in that `.env`, in the files it names beside it, or
+in the `gh` and `glab` stores a token is borrowed from — and nowhere else.
+What triage holds, and what it does with it, is in
+[SECURITY.md](SECURITY.md).
 
 ## Sources
 
@@ -66,4 +73,14 @@ Everything else is optional — see [configuration](docs/configuration.md).
 - [Architecture](docs/architecture.md) — the four seams and the store
 - [History](docs/history.md) · [The plan](docs/plan.md)
 
-Working on triage: [CONTRIBUTING.md](CONTRIBUTING.md).
+## Contributing
+
+Pull requests are welcome, from people and from their agents.
+[CONTRIBUTING.md](CONTRIBUTING.md) is how to work on the tree — the
+layout, the seams, running an instance against a fake, where a test goes,
+and what happens to a pull request once it is open. [AGENTS.md](AGENTS.md)
+is the short version for an agent working in a checkout. A new source is
+the most common contribution and the most welcome; the walkthrough is
+[there](CONTRIBUTING.md#adding-a-source).
+
+[MIT](LICENSE).
