@@ -217,6 +217,7 @@ forge and writing nothing. For the calendar, the equivalent is
 | what the demo boots | `demo.test.js` |
 | the runner — ingest, the clock, reconcile, snooze wakes | `pipeline.test.js` |
 | the store | `store.test.js` |
+| the Slack SDKs themselves — a Dependabot bump | `slack-sdk.test.js`: the real packages over a fake Slack, skipped without `node_modules`, required in CI's `install` job |
 
 The fakes are real clients over a fake far end where it matters:
 `fake-twenty.js` pages for real, and `fake-ha.js` mutates its lists, so
@@ -250,7 +251,7 @@ What happens next, in order:
 
 1. **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the
    suite in two zones, boots the demo with nothing installed, and installs
-   the lock file. **If you are not a member of the organisation, a
+   the lock file to run the one test that loads the Slack packages for real. **If you are not a member of the organisation, a
    maintainer approves each run first.** The run would reach nothing — a
    read-only token, no secrets, GitHub's own actions pinned to commits —
    but a stranger's code runs after a person has read it, not before.

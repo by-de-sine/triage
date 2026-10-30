@@ -96,4 +96,10 @@ jobs:
         with:
           node-version-file: .node-version
       - run: npm ci --ignore-scripts
-      - run: node -e 'import("@slack/bolt").then(() => console.log("the app path resolves"))'
+      # The one test that loads the two packages for real — the shapes
+      # deliver/ reads, an App built offline, our handlers through Bolt's
+      # dispatch. Skipped everywhere else; here it must run, so a
+      # Dependabot bump is checked against the code and not a changelog.
+      - run: node --test test/slack-sdk.test.js
+        env:
+          TRIAGE_REQUIRE_SDK: '1'

@@ -51,7 +51,9 @@ file, not the process:
   host, never its URL, and never a token.
 - **Two dependencies**, both from Slack, both loaded only under
   `TRIAGE_SLACK=app`; the tests and the demo run with no `node_modules`.
-  Dependabot keeps them and the pinned CI actions current.
+  Dependabot keeps them and the pinned CI actions current, and CI's
+  `install` job holds a bump to the contract `deliver/` relies on
+  (`test/slack-sdk.test.js`) before a person reads it.
 
 ## What a contributor can reach
 
