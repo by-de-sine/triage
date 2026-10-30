@@ -28,7 +28,7 @@ import crm from './sources/crm.js';
 import crmRules from './rules/crm.js';
 import { TwentyApi } from './lib/twenty-api.js';
 import { existsSync } from 'node:fs';
-import { sameLogin } from './lib/util.js';
+import { isMe } from './lib/util.js';
 
 const log = (m) => console.error(`${new Date().toISOString()} triage: ${m}`);
 const cfg = loadConfig();
@@ -91,7 +91,7 @@ await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken, {}, async () =
 // own, always: with both forges off there is no login to take, and a store
 // TRIAGE_DB names must not have the canned day filed under its owner.
 const user = cfg.demo ? 'alice' : store.firstUser() ?? identity.github ?? identity.gitlab ?? null;
-if (user && Object.values(identity).length && !Object.values(identity).some((me) => sameLogin(me, user))) log(`items belong to ${user} (the store's), which is none of this boot's identities (${Object.entries(identity).map(([k, v]) => `${k}: ${v}`).join(', ')}) — set TRIAGE_DB to start a queue of your own`);
+if (user && Object.values(identity).length && !Object.values(identity).some((me) => isMe(user, me))) log(`items belong to ${user} (the store's), which is none of this boot's identities (${Object.entries(identity).map(([k, v]) => `${k}: ${v}`).join(', ')}) — set TRIAGE_DB to start a queue of your own`);
 
 // M3: the second source, read from an ICS feed (plan §16, G4) or from
 // Google. It registers only when it can actually read a calendar — a box
@@ -111,6 +111,16 @@ const hass = await haSource(cfg.ha, log);
 // The CRM (plan §12.3 item 3): Twenty's tasks as state, and anybody else's
 // change as an event; read-only, on its own key, and off unless configured.
 const twenty = await crmSource(cfg.crm, log);
+// Every name you act under in the CRM — you as a member, and the keys your
+// agents hold — through the identity map like a forge's login, so the
+// reports count an agent's edit as yours. Resolved once, through the
+// source's own `whoami`; a CRM that cannot answer at boot does not stop the
+// box (the poll raises its own alarm), it only leaves the reports with the
+// keys alone until a restart.
+if (twenty) {
+  try { identity.crm = await crm.whoami({ api: twenty, self: cfg.crm.self, agents: cfg.crm.agents }); }
+  catch (e) { identity.crm = [...cfg.crm.agents]; log(`crm: cannot resolve your member name at boot (${e.message}); the reports count only your agents' keys (${cfg.crm.agents.join(', ') || 'none'}) as yours until a restart`); }
+}
 if (cal) { sources.push(calendar); rules.calendar = calendarRules; }
 if (led) { sources.push(ledger); rules.ledger = ledgerRules; }
 if (hass) { sources.push(ha); rules.ha = haRules; }

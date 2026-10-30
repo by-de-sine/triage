@@ -165,6 +165,56 @@ test('when: hour by weekday in the zone, yours apart from theirs apart from the 
   const g = report(store, 'when', { user: ME, since: '2026-09-01T00:00:00Z', until: NOW.toISOString(), tz: TZ, now: NOW, source: 'github' });
   assert.deepEqual(g.totals, { mine: 3, theirs: 2, bots: 1, interrupts: 1 });
   assert.equal(g.source, 'github');
+  // An identity may be every name you act under on a source — the CRM's
+  // member and the keys your agents hold — and an event by any is yours.
+  const many = report(store, 'when', { user: ME, since: '2026-09-01T00:00:00Z', until: NOW.toISOString(), tz: TZ, now: NOW, identity: { github: ['alice', 'ann'] } });
+  assert.deepEqual(many.totals, { mine: 4, theirs: 2, bots: 1, interrupts: 1 }, "ann's comment is yours when ann is one of your names");
+  store.close();
+});
+
+test('changelog: what moved per bucket and who moved it, the strongest verdict in its words, the interrupt marked, your actions listed', () => {
+  const store = fixture();
+  const opts = { user: ME, since: '2026-09-10T07:00:00Z', until: NOW.toISOString(), tz: TZ, now: NOW };
+  const r = report(store, 'changelog', opts);
+  assert.equal(r.report, 'changelog');
+  const by = Object.fromEntries(r.buckets.map((b) => [b.key, b]));
+  // Day 1: two items moved. #1 — ann, the owner, a bot; #2 — bob. Both verdicts are the seeded P2.
+  assert.equal(by['2026-09-10'].items, 2);
+  assert.deepEqual(by['2026-09-10'].who, { you: 1, others: 2, bots: 1 });
+  const [one, two] = by['2026-09-10'].entries;
+  assert.equal(one.item_key, 'o/r#1', 'the later-touched item first within a tier');
+  assert.deepEqual(one.actors, [{ name: 'ann', who: 'others' }, { name: ME, who: 'you' }, { name: 'coderabbitai[bot]', who: 'bots' }]);
+  assert.deepEqual(one.events, { comment: 2, review: 1 });
+  assert.deepEqual(one.verdict, { rule: 'state_change_on_mine', tier: 'P2', reason: 'seeded', ts: at('2026-09-10T16:00:00Z') });
+  assert.equal(one.interrupted, false);
+  assert.deepEqual(one.actions, []);
+  assert.equal(two.item_key, 'o/r#2');
+  // Day 2: the P0 on #1 interrupted, and the owner closed it from the page.
+  assert.equal(by['2026-09-11'].items, 1);
+  const p0 = by['2026-09-11'].entries[0];
+  assert.deepEqual([p0.item_key, p0.verdict.rule, p0.verdict.tier, p0.verdict.reason, p0.interrupted, p0.actions], ['o/r#1', 'reply_to_my_comment', 'P0', 'ann replied', true, ['done']]);
+  assert.deepEqual(p0.events, {}, 'no event landed in triage that day; the verdict and the action are the story');
+  assert.equal(by['2026-09-11'].interrupts, 1);
+  // Day 3: the ledger row arrived and its owner deleted it — resolved by the source, not by you; #2 was snoozed by you.
+  assert.equal(by['2026-09-12'].items, 2);
+  const row = by['2026-09-12'].entries.find((e) => e.item_key === 'row:abc');
+  assert.deepEqual([row.who, row.actions, row.verdict.tier], [{ you: 0, others: 1, bots: 0 }, [], 'P1'], "a source's own resolve is not something you did");
+  assert.deepEqual(by['2026-09-12'].entries.find((e) => e.item_key === 'o/r#2').actions, ['snooze']);
+  assert.equal(by['2026-09-12'].entries[0].item_key, 'row:abc', 'P1 before P2');
+  // Day 4: the wake is the system's, so nothing of yours moved and the day is empty.
+  assert.equal(by['2026-09-13'].items, 0);
+  assert.deepEqual(r.totals, { items: 5, who: { you: 1, others: 3, bots: 1 }, interrupts: 1, actions: 2, folded: 0 });
+  // Every name you act under on a source is you: ann as one of your keys.
+  const yours = report(store, 'changelog', { ...opts, identity: { github: ['alice', 'ann'] } });
+  assert.deepEqual(yours.buckets[0].who, { you: 2, others: 1, bots: 1 });
+  assert.equal(yours.buckets[0].entries[0].actors[0].who, 'you');
+  // Past the cap, a bucket lists the first entries and counts the rest.
+  for (let n = 0; n < 105; n++) seed(store, `z/r#${n}`, { created: at('2026-09-14T12:00:00Z'), events: [{ ts: '2026-09-14T12:00:00Z', actor: 'ann' }] });
+  const capped = report(store, 'changelog', opts);
+  const day = capped.buckets.find((b) => b.key === '2026-09-14');
+  assert.deepEqual([day.items, day.entries.length, day.folded, capped.cap], [105, 100, 5, 100]);
+  // Nothing written.
+  assert.equal(store.decisions({ limit: 1000 }).length, 5 + 105);
   store.close();
 });
 
@@ -217,7 +267,7 @@ test('response: how long things waited for you, with the sample size on it; how 
 
 test('the registry describes itself, and a bad ask is refused with a status', () => {
   const d = describeReports();
-  assert.deepEqual(Object.keys(d.reports), ['flow', 'when', 'where', 'response']);
+  assert.deepEqual(Object.keys(d.reports), ['flow', 'when', 'where', 'response', 'changelog']);
   assert.deepEqual(d.buckets, ['hour', 'day', 'week']);
   const store = new Store();
   assert.throws(() => report(store, 'nope', { user: ME }), (e) => e.status === 404);

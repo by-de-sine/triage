@@ -18,7 +18,7 @@ import { SlackDelivery } from '../deliver/slack.js';
 import { resolve } from '../deliver/interrupts.js';
 import { loadConfig, parseCrmProjects } from '../lib/config.js';
 import { TwentyApi } from '../lib/twenty-api.js';
-import crm, { fingerprint, changedFields, isOther, resolveSelf, who, isDue, HEALTH_KEY, TASK_FIELDS } from '../sources/crm.js';
+import crm, { fingerprint, changedFields, isOther, unnamedKey, resolveSelf, who, isDue, HEALTH_KEY, TASK_FIELDS } from '../sources/crm.js';
 import rules, { didWhat } from '../rules/crm.js';
 import { fakeTwenty, world, task, note, edit, BY, ALICE, BOB } from './fake-twenty.js';
 
@@ -68,6 +68,23 @@ test('who is somebody else: Alice in the UI and Alice through MCP are not; Bob, 
   assert.equal(isOther(null, { self, agents: AGENTS }), true, 'no actor at all is not proof it was Alice');
   assert.equal(who(BY.bobUi), 'Bob Example');
   assert.equal(who(BY.unknownKey), 'Zapier (api)');
+  // A key nobody named is the one "somebody else" worth saying out loud:
+  // through the API, by a name neither list holds, and no member behind it.
+  assert.equal(unnamedKey(BY.unknownKey, { self, agents: AGENTS }), true);
+  assert.equal(unnamedKey(BY.bobAgent, { self, agents: AGENTS }), true, "Bob's key is unnamed too — the config cannot tell his from one of Alice's");
+  assert.equal(unnamedKey(BY.aliceMcp, { self, agents: AGENTS }), false, 'a named key');
+  assert.equal(unnamedKey(BY.bobUi, { self, agents: AGENTS }), false, 'a person in the UI is not a key');
+  assert.equal(unnamedKey({ source: 'AGENT', workspaceMemberId: null, name: 'Side door' }, { self, agents: AGENTS }), true, "Twenty's agent surface counts as the API");
+  assert.equal(unnamedKey(null, { self, agents: AGENTS }), false);
+});
+
+test('whoami is every name you act under: the member names TRIAGE_CRM_ME resolves to, and the keys your agents hold', async () => {
+  assert.deepEqual(await crm.whoami({ api: fakeTwenty(), self: SELF, agents: AGENTS }), ['Alice Example', 'Agent key']);
+  assert.deepEqual(await crm.whoami({ api: fakeTwenty(), self: [ALICE], agents: ['Agent key', 'agent key'] }), ['Alice Example', 'Agent key', 'agent key'], 'an id resolves to the name; the keys are passed as typed');
+  assert.deepEqual(await crm.whoami({ api: fakeTwenty(), self: SELF, agents: [] }), ['Alice Example']);
+  await assert.rejects(crm.whoami({ api: fakeTwenty(), self: ['nobody@example.test'], agents: AGENTS }), /is no workspace member/, 'an owner it cannot recognise is an error, like the poll');
+  await assert.rejects(crm.whoami({ api: fakeTwenty(), self: ['0c7d9d0e-1111-4222-8333-444444444444'], agents: AGENTS }), /is no member this key can see/, 'an id the poll would trust has no name here, and silence would file that member under "others"');
+  await assert.rejects(crm.whoami({ api: fakeTwenty(world(), { fail: 'down' }), self: SELF, agents: AGENTS }), 'a CRM that is down cannot say');
 });
 
 test('TRIAGE_CRM_ME resolves by id, email or name, and an entry that matches nobody is an error, not a smaller set', () => {
@@ -185,19 +202,36 @@ test('Alice editing through MCP or in the UI never interrupts; it re-ranks quiet
   }
 });
 
-test('a key nobody named adding a note makes the note an item, and interrupts', async () => {
-  const { w, tick, item } = boot();
+test('a key nobody named adding a note makes the note an item, and interrupts — and the key is named, once, in the log', async () => {
+  const { w, tick, item, logs, health } = boot();
   await tick(0);
+  assert.equal(health.unnamed, undefined, 'the baseline names nobody: nothing was edited while triage watched');
   w.notes.push(note({ id: 'answer', title: 'Answer on #16', body: 'The 404 is an old URL.', by: BY.unknownKey, at: iso(1) }));
   const r = await tick(1);
   const d = r.decisions.find((x) => x.item === 'crm:note:answer');
   assert.equal(d.rule, 'changed_by_other');
   assert.equal(d.reason, 'Zapier (api) added a note');
   assert.equal(item('answer', 'note').repo, 'acme');
+  // The first edit by a key on no list is said out loud, naming the variable
+  // that would make it yours — the thing that stops the drift of 2026-10-17.
+  const said = () => logs.filter((m) => /"Zapier" edits records through the API and is on no list/.test(m));
+  assert.equal(said().length, 1);
+  assert.match(said()[0], /add it to TRIAGE_CRM_AGENTS/);
+  assert.deepEqual(health.unnamed, ['Zapier']);
+  assert.match(logs.find((m) => /1 changed by someone else/.test(m)), /by a key nobody named: Zapier/, 'and the status line names it');
   // Alice answering on that note stays part of its story, and does not buzz.
   edit(w.notes.find((n) => n.id === 'answer'), { body: 'The 404 is an old URL. — thanks, closing.' }, BY.aliceMcp, at(2));
   const r2 = await tick(2);
   assert.equal(r2.decisions.find((x) => x.item === 'crm:note:answer').rule, 'ambient');
+  // The same key editing again is said on the status line, and not in the log twice.
+  edit(w.tasks.find((x) => x.id === 'bob'), { body: 'Done the investigation.' }, BY.unknownKey, at(3));
+  await tick(3);
+  assert.equal(said().length, 1, 'once per key per process');
+  assert.equal(logs.filter((m) => /by a key nobody named: Zapier/.test(m)).length, 2);
+  // A named key never is: Alice's agents are hers.
+  edit(w.tasks.find((x) => x.id === 'open'), { body: 'Drafted.' }, BY.aliceMcp, at(4));
+  await tick(4);
+  assert.deepEqual(health.unnamed, ['Zapier']);
 });
 
 test('a status change says so; Bob marking a task Done is news, then reconcile resolves it as the source', async () => {

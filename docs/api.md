@@ -36,7 +36,7 @@ from another host is refused on writes; `curl` sends none.
 | | |
 |---|---|
 | `GET /stats` | the reports page (`public/stats.html`) |
-| `GET /api/reports` | the reports there are, and the question each answers: `flow`, `when`, `where`, `response` |
+| `GET /api/reports` | the reports there are, and the question each answers: `flow`, `when`, `where`, `response`, `changelog` |
 | `GET /api/reports/:name` | `?since=&until=&bucket=hour\|day\|week&by=&source=` — one report over a window, bucketed in `TRIAGE_TZ`; thirty days by the day by default |
 
 What each report means is on [using the list](using.md#reports). Nothing

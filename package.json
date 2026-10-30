@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "your queue, tiered: GitHub notifications in, tiered items out, the urgent ones in Slack",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/by-de-sine/triage.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
