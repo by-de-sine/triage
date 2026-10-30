@@ -137,7 +137,9 @@ needed until milestone 3.
   reader and open to strangers):* `.github/workflows/ci.yml`, on GitHub's
   runners, GitHub's own actions pinned to commits and nothing else — the
   suite in two zones, the demo booting with no `node_modules`, the lock
-  file installing. A fork's run waits for a maintainer and reaches nothing;
+  file installing for the one test that drives the two packages for real
+  (`test/slack-sdk.test.js`, added 2026-10-30 — what a Dependabot major
+  is held to). A fork's run waits for a maintainer and reaches nothing;
   `main` takes only pull requests whose checks passed. CodeRabbit reviews on
   the `coderabbit` label, for members only. `SECURITY.md` is the policy and
   says why each of those is so.

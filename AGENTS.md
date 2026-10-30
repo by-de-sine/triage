@@ -40,7 +40,9 @@ Instructions for agents working in this repository.
 - **`npm test` before every push, and CI green before anyone reads the
   PR.** CI runs the suite in two zones (`TZ=UTC npm test` catches what
   your zone hides), boots the demo with nothing installed, and installs
-  the lock file. The workflow is `.github/workflows/ci.yml`; it runs on
+  the lock file to run the one test that loads the Slack packages for
+  real (`test/slack-sdk.test.js`, where a dependency bump is checked).
+  The workflow is `.github/workflows/ci.yml`; it runs on
   GitHub's own actions only, pinned to commits — do not add a third-party
   action to it.
 - **CodeRabbit is spent on purpose.** Open a real pull request when the

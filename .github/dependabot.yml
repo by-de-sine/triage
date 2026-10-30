@@ -1,6 +1,7 @@
 # Dependabot keeps the two npm packages and the pinned actions current, one
 # grouped pull request a month each. Its pull requests run CI like any
-# other and are reviewed by a person; CodeRabbit sees them only if a
+# other — the `install` job runs test/slack-sdk.test.js against the bumped
+# packages — and are reviewed by a person; CodeRabbit sees them only if a
 # maintainer labels them (.coderabbit.yaml).
 version: 2
 updates:
