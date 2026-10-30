@@ -278,7 +278,7 @@ async function crmSource(c, log) {
     if (c.mode === 'on') process.exit(1);
     return null;
   }
-  const api = new TwentyApi({ url: c.url, key: c.key });
+  const api = new TwentyApi({ url: c.url, key: c.key, accessClientId: c.accessClientId, accessClientSecret: c.accessClientSecret });
   log(`crm: ${api.host}, you are ${c.self.join(', ')}; your agents are ${c.agents.join(', ') || 'none'}; unread for ${Math.round(c.staleMs / 60_000)} min is a P0${Object.keys(c.projects).length ? `; projects ${Object.entries(c.projects).map(([k, v]) => `${k}=${v}`).join(', ')}` : ''}`);
   return api;
 }

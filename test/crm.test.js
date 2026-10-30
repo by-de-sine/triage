@@ -17,6 +17,7 @@ import { Ranker } from '../lib/rank.js';
 import { SlackDelivery } from '../deliver/slack.js';
 import { resolve } from '../deliver/interrupts.js';
 import { loadConfig, parseCrmProjects } from '../lib/config.js';
+import { TwentyApi } from '../lib/twenty-api.js';
 import crm, { fingerprint, changedFields, isOther, unnamedKey, resolveSelf, who, isDue, HEALTH_KEY, TASK_FIELDS } from '../sources/crm.js';
 import rules, { didWhat } from '../rules/crm.js';
 import { fakeTwenty, world, task, note, edit, BY, ALICE, BOB } from './fake-twenty.js';
@@ -296,7 +297,7 @@ test('a CRM that cannot be read is a P0 after the stale window — once per outa
   api.fail = 'auth';
   let r = await tick(10);
   assert.equal(r.ok, false);
-  assert.match(r.error, /key was refused/);
+  assert.match(r.error, /request refused — check the Twenty API key and Cloudflare Access policy/);
   assert.equal(item(null, 'health'), undefined);
   r = await tick(29);
   assert.equal(store.items({ user: ME, source: 'crm' }).find((i) => i.key === HEALTH_KEY), undefined, 'inside the window, silence is allowed');
@@ -305,7 +306,7 @@ test('a CRM that cannot be read is a P0 after the stale window — once per outa
   const alarm = r.due.decisions[0];
   assert.equal(alarm.rule, 'crm_unread');
   assert.equal(alarm.tier, 'P0');
-  assert.match(alarm.reason, /not been read for 31 min — twenty 401: the key was refused/);
+  assert.match(alarm.reason, /not been read for 31 min — twenty 401: request refused — check the Twenty API key and Cloudflare Access policy/);
   assert.doesNotMatch(alarm.note, /does not interrupt/, 'it is in the default interrupt set');
   // Still down a minute later: the same outage, not a second alarm.
   r = await tick(40);
@@ -369,12 +370,41 @@ test('config: unset is on only with a URL, a key and who Alice is; a typo is ref
   assert.equal(c.url, 'https://crm.example.test');
   assert.deepEqual(c.self, [ALICE, 'alice@example.test']);
   assert.deepEqual(c.agents, ['Agent key', 'Other key']);
+  assert.equal(c.accessClientId, null);
+  assert.equal(c.accessClientSecret, null);
   assert.equal(c.staleMs, 15 * 60_000);
   assert.deepEqual(c.projects, { 'Acme Corp': 'acme' });
   assert.deepEqual(loadConfig({ ...base, TRIAGE_CRM_AGENTS: '' }).crm.agents, [], 'an empty list says Alice has no agents');
   assert.throws(() => loadConfig({ ...base, TRIAGE_CRM: 'onn' }), /TRIAGE_CRM must be/);
   assert.throws(() => loadConfig({ ...base, TRIAGE_CRM_STALE_MIN: 'soon' }), /TRIAGE_CRM_STALE_MIN/);
   assert.throws(() => parseCrmProjects('Acme Corp'), /is not Company Name=project/);
+  assert.throws(() => loadConfig({ ...base, TWENTY_CF_ACCESS_CLIENT_ID: 'id' }), /must be set together/);
+  assert.throws(() => loadConfig({ ...base, TWENTY_CF_ACCESS_CLIENT_SECRET: 'secret' }), /must be set together/);
+  assert.throws(() => loadConfig({ ...base, TWENTY_URL: 'http://crm.example.test', TWENTY_CF_ACCESS_CLIENT_ID: 'id', TWENTY_CF_ACCESS_CLIENT_SECRET: 'secret' }), /require an HTTPS TWENTY_URL/);
+  const access = loadConfig({ ...base, TWENTY_URL: 'https://crm.example.test', TWENTY_CF_ACCESS_CLIENT_ID: 'id', TWENTY_CF_ACCESS_CLIENT_SECRET: 'secret' }).crm;
+  assert.equal(access.accessClientId, 'id');
+  assert.equal(access.accessClientSecret, 'secret');
+});
+
+test('Twenty GraphQL sends optional Access credentials only with a complete pair and refuses redirects', async () => {
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push({ url, init });
+    return { status: 200, text: async () => JSON.stringify({ data: { ok: true } }) };
+  };
+  const plain = new TwentyApi({ url: 'https://crm.example.test', key: 'key', fetch });
+  assert.deepEqual(await plain.gql('{ ok }'), { ok: true });
+  assert.equal(calls[0].init.redirect, 'manual');
+  assert.equal(calls[0].init.headers['CF-Access-Client-Id'], undefined);
+  assert.equal(calls[0].init.headers['CF-Access-Client-Secret'], undefined);
+
+  const protectedApi = new TwentyApi({ url: 'https://crm.example.test', key: 'key', accessClientId: 'client-id', accessClientSecret: 'client-secret', fetch });
+  assert.deepEqual(await protectedApi.gql('{ ok }'), { ok: true });
+  assert.equal(calls[1].init.headers['CF-Access-Client-Id'], 'client-id');
+  assert.equal(calls[1].init.headers['CF-Access-Client-Secret'], 'client-secret');
+
+  protectedApi.fetch = async () => ({ status: 302, text: async () => { throw new Error('redirect body was read'); } });
+  await assert.rejects(protectedApi.gql('{ ok }'), (error) => error.status === 302 && /Cloudflare Access policy/.test(error.message) && !/client-secret/.test(error.message));
 });
 
 test('a next page with no new cursor is a failed read, not a re-read from the top', async () => {
