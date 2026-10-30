@@ -19,7 +19,7 @@
     "replay": "node bin/replay.js"
   },
   "dependencies": {
-    "@slack/bolt": "^4.7.3",
-    "@slack/web-api": "^7.19.0"
+    "@slack/bolt": "^5.1.0",
+    "@slack/web-api": "^8.2.0"
   }
 }
