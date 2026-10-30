@@ -215,6 +215,14 @@ test('changelog: what moved per bucket and who moved it, the strongest verdict i
   assert.deepEqual([day.items, day.entries.length, day.folded, capped.cap], [105, 100, 5, 100]);
   // Nothing written.
   assert.equal(store.decisions({ limit: 1000 }).length, 5 + 105);
+  // A seen row is listed as yours and moves no state: the flow's replay walks past it.
+  const second = store.items({ user: ME }).find((i) => i.key === 'o/r#2');
+  const flowBefore = report(store, 'flow', opts).buckets.find((b) => b.key === '2026-09-13');
+  store.addAction({ item_id: second.id, action: 'seen', by: 'seat', data: {} }, at('2026-09-13T13:00:00Z'));
+  const seen = report(store, 'changelog', opts);
+  assert.deepEqual(seen.buckets.find((b) => b.key === '2026-09-13').entries.find((e) => e.item_key === 'o/r#2').actions, ['seen']);
+  assert.deepEqual(report(store, 'flow', opts).buckets.find((b) => b.key === '2026-09-13'), flowBefore, 'seen is no transition: the flow is what it was');
+  assert.equal(report(store, 'response', opts).by_action.seen, 1, 'but it is a response of yours, measured');
   store.close();
 });
 

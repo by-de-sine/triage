@@ -55,6 +55,7 @@ export function actedLine({ action, until, marked, reason, choice, at }) {
     case 'open': return `↺ reopened${t}`;
     case 'wake': return `⏰ snooze ended${t}`;
     case 'reopen': return `↺ reopened ${reason ? '— ' + esc(reason) : 'by new activity'}${t}`;
+    case 'seen': return `👁 seen${t}`;   // says what happened, not where the item is — a seen item may be in any state
     default: return `${esc(action)}${t}`;
   }
 }

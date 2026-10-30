@@ -1129,6 +1129,14 @@ actions, one code path — because an action is a fact about what the owner did,
 not an opinion about what they should do. The seat may act on the owner's behalf
 through the same door every other surface uses. It may not rank.
 
+*2026-10-21:* a seventh action, `seen`, went through that door for exactly
+this reason. The seat's attention report lists a few items with a tick
+beside each; the tick had to be a decision triage counts (the response and
+changelog reports read `actions`), and none of the six fit — Done closes
+the item, which a tick on "know this" does not mean. `seen` writes the row
+and nothing else. It is still a fact about what the owner did, never what
+the seat thinks.
+
 
 ### 13.6 What "more programmatic output" means
 

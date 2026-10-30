@@ -27,6 +27,7 @@ over.
 | 2026-10-15 | **G2 · webhook shapes** — `slack`, `discord`, `generic` (#3) | §16.3 |
 | 2026-10-15 | **G3 · the demo** — `TRIAGE_DEMO=1`, every fake at once (#4) | §16.3 |
 | 2026-10-15 | **G4 · ICS** — the calendar as a feed, `lib/ics.js` (#5) | §16.3 |
+| 2026-10-21 | **Seen** — a seventh action that changes no state: the tick from a surface that presents an item without owning it, counted where the reports read actions | §13.5 |
 
 Still intended: **M6 · learn it** (revealed preference from actions,
 saturation, hysteresis tuning), **G5 · the Slack app surface** (when the
