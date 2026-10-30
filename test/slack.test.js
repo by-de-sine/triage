@@ -57,7 +57,7 @@ test('a P0 is one DM with title, repo, actor, one line and an Open button', asyn
   assert.equal(store.lastDelivery(item.id).message_ts, '1.0');
 });
 
-test('a second P0 on the same item inside ten minutes updates the message; after, a new one', async () => {
+test('a second P0 on the same item inside ten minutes updates the message; after, it is folded in: a reply in its thread, and the DM redrawn', async () => {
   const { item, client, d, clock } = setup();
   await d.deliver({ item, decision: dec(1), event: ev() });
   clock.tick(5 * 60_000);
@@ -68,9 +68,19 @@ test('a second P0 on the same item inside ten minutes updates the message; after
   assert.equal(client.calls[1][1].ts, '1.0');
   assert.match(client.calls[1][1].blocks[1].text.text, /and another/);
   clock.tick(11 * 60_000);
-  const r2 = await d.deliver({ item, decision: dec(3), event: ev({ id: 3, ts: '2026-09-08T12:20:00Z' }) });
-  assert.equal(client.calls[2][0], 'post');
-  assert.equal(r2.note, 'sent D1 2.0');
+  const r2 = await d.deliver({ item, decision: dec(3), event: ev({ id: 3, ts: '2026-09-08T12:20:00Z', body: 'third' }) });
+  assert.equal(r2.note, 'followed up in D1 1.0 (reply 2.0)');
+  const [kind, reply] = client.calls[2];
+  assert.equal(kind, 'post');
+  assert.equal(reply.thread_ts, '1.0', 'into the DM\'s thread, not a second DM');
+  assert.equal(reply.reply_broadcast, true, 'broadcast, so it notifies');
+  assert.equal(reply.channel, 'D1');
+  assert.match(reply.text, /third/);
+  assert.equal(reply.blocks.some((b) => b.type === 'actions'), false, 'the buttons stay on the DM');
+  assert.deepEqual(client.calls[3].slice(0, 1), ['update']);
+  assert.equal(client.calls[3][1].ts, '1.0');
+  assert.match(client.calls[3][1].blocks[1].text.text, /third/, 'the DM says the newest thing');
+  assert.equal(client.calls[3][1].blocks.at(-1).type, 'actions');
 });
 
 test('inside the quiet window a P0 is held, then flushed once when it ends', async () => {
@@ -130,7 +140,7 @@ test('the timer is the flush and nothing else — no batch, no digest (plan §11
   const { item } = store.upsertItem({ user: 'alice', source: 'github', key: 'o/r#10', kind: 'pull', title: 'PR', url: 'u', repo: 'o/r', last_activity: '2026-09-08T11:30:00Z' });
   store.setTier(item.id, 'P1', 1);
   store.addDecision({ item_id: item.id, rule: 'comment_on_my_thread', tier: 'P1', reason: 'moved', event_ids: [] });
-  assert.deepEqual(await d.tick(), { flushed: 0 });
+  assert.deepEqual(await d.tick(), { flushed: 0, home: false });
   assert.equal(client.calls.length, 0, 'a P1 verdict is placed in the list; nothing sends it later');
   assert.equal(typeof d.batch, 'undefined');
   assert.equal(typeof d.digest, 'undefined');

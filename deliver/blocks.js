@@ -43,16 +43,18 @@ export function parseAction(action) {
 /** One line under the title: what happened to it, by whose hand. `marked` is
  *  what Done did outside triage — the GitHub thread read, or, for a source
  *  triage only reads, the sentence saying it did nothing there. */
-export function actedLine({ action, until, marked, at }) {
+export function actedLine({ action, until, marked, reason, choice, at }) {
   const t = at ? ` · ${when(at)}` : '';
   switch (action) {
     case 'done': return `✓ done${marked === 'marked read' ? ' · thread marked read on GitHub' : marked ? ' · ' + esc(marked) : ''}${t}`;
+    case 'answer': return `✓ answered${choice ? ' ' + esc(choice) : ''}${t}`;
+    case 'resolved': return `✓ resolved at its source${reason ? ' — ' + esc(reason) : ''}${t}`;
     case 'snooze': return `⏰ snoozed until ${when(until)}${t}`;
     case 'later': return `↓ later — sinks without a date${t}`;
     case 'mute': return `🔇 muted — tiered and logged, never sent${t}`;
     case 'open': return `↺ reopened${t}`;
     case 'wake': return `⏰ snooze ended${t}`;
-    case 'reopen': return `↺ reopened by new activity${t}`;
+    case 'reopen': return `↺ reopened ${reason ? '— ' + esc(reason) : 'by new activity'}${t}`;
     default: return `${esc(action)}${t}`;
   }
 }
@@ -92,9 +94,19 @@ function linkLine(links, acted = null) {
  *  It goes in **both** the fallback text, which is what a push shows, and
  *  the first block, which is what Slack parses for the mention itself. */
 const SHAPES = { event: eventMessage };
-export function p0Message({ item, decision, event, acted = null, interactive = true, mention = null }) {
-  return (SHAPES[item.kind] || threadMessage)({ item, decision, event, acted, interactive, mention });
+export function p0Message({ item, decision, event, acted = null, interactive = true, mention = null, status = [] }) {
+  const m = (SHAPES[item.kind] || threadMessage)({ item, decision, event, acted, interactive, mention });
+  // G5: what has happened to the item since the message was written that
+  // nobody pressed for — the snooze ended, new activity reopened it, a newer
+  // verdict landed. Lines above the buttons, which stay: it is open again.
+  if (status.length && !acted) m.blocks.splice(m.blocks.length - 1, 0, context(status.join('\n')));
+  return m;
 }
+
+/** A newer verdict than the one the message was written for, as one line:
+ *  the message keeps its own words (a P1 must not rewrite a P0's), and says
+ *  where the item stands now beneath them. */
+export const sinceLine = (d) => `since: ${d.tier ? `\`${d.tier}\` ` : ''}${esc(d.reason || d.rule)}${d.ts ? ` · ${when(d.ts)}` : ''}`;
 
 /** `<@U123> ` before the line, or nothing at all. Never on an acted message:
  *  that one is a redraw saying what you already did, and buzzing you for it

@@ -142,10 +142,8 @@ change wants (`TRIAGE_DEMO=1` turns on all six):
 
 ### Proving delivery
 
-**Never point a development instance at a real Slack or Discord.** Two
-instances on one webhook post everything twice; two on one Slack app both
-receive every button press. Prove delivery against a listener you start
-yourself — what it prints is byte for byte what the far end would receive:
+A webhook's payload is easiest to read off a listener you start yourself
+— what it prints is byte for byte what the far end would receive:
 
 ```bash
 node -e "require('http').createServer((q,s)=>{let b='';q.on('data',c=>b+=c);q.on('end',()=>{console.log(b);s.end('ok')})}).listen(3398)"
@@ -158,7 +156,29 @@ TRIAGE_DELIVER_MAX_AGE_H=168                    # optional: let the last week's 
 ```
 
 `GET /api/decisions` shows what was sent, held or not delivered, and why.
-The Slack app's Bolt wiring can only be exercised against a real app.
+
+The Slack app's Bolt wiring can only be exercised against a real app, and a
+worktree may use one. A **development app** made from
+[`slack/manifest.yml`](slack/manifest.yml), with its name and slash command
+changed (`/triage-dev` — `/triage` answers to `/triage-*`), is the clean
+way: its DMs and button presses are the worktree's alone. Its three values
+go in the worktree's `.env`:
+
+```bash
+TRIAGE_SLACK=app
+SLACK_BOT_TOKEN=xoxb-…    # the development app's
+SLACK_APP_TOKEN=xapp-…
+SLACK_USER_ID=U…
+```
+
+Production's own app or webhook works too, with two costs: a webhook shared
+by two instances posts everything twice, and Socket Mode hands each event to
+one of the connections open on an app, so a press on production's DM may
+land on the worktree instead. The worktree acts on it — on *its* item of
+that id, which may be another thread altogether — so with a real GitHub
+token, a Done pressed on production's DM can mark a different real thread
+read. Pair production's tokens with `TRIAGE_GITHUB=fake`, or use the
+development app.
 
 ### Would that have been P0?
 
@@ -182,6 +202,7 @@ forge and writing nothing. For the calendar, the equivalent is
 | what may interrupt — layers, statements, projects | `interrupts.test.js` |
 | reading config or the preferences file | `config.test.js` |
 | what a message says | `slack.test.js` or `handlers.test.js`, against `deliver/blocks.js` |
+| the app's DM following the item, follow-ups, the Home tab | `surface.test.js` |
 | webhook delivery — windows, guards | `slack.test.js` (the webhook section) |
 | the webhook client, shapes, mentions | `notify.test.js` |
 | acting | `actions.test.js`, `api.test.js` |

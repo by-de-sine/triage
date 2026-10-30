@@ -1684,6 +1684,34 @@ the follow-up folded into the message instead of held, and the Home tab
 kept current rather than drawn on request. Nothing more is planned
 here; the rest is a build session on the day the app exists.
 
+*Built 2026-10-16 (G5), with the calls the paragraph left open made as
+follows.* **The DM is where the item lives**, and every redraw is drawn
+from the item's state and its last action (`itemMessage` in
+`deliver/handlers.js`), so a press and a poll cannot disagree about what
+the message says. The moves nobody pressed for reach delivery through one
+optional method, `deliver.moved({ item, drawn })`, called by the pipeline
+for every verdict and wake and by the runner for what reconcile closed or
+reopened; `lib/` still names no surface and no source. **Re-ranked** is
+read as *a newer verdict landed*: the DM keeps the words of the decision
+it was sent for and gains a `since:` line, because a rank position on the
+DM would redraw it on every drift of the time terms. **The follow-up is a
+reply in the DM's thread with `reply_broadcast`**, and the DM is redrawn
+with the newer words — rather than a silent edit, which does not notify,
+or a second DM, which would be a second set of buttons to keep current.
+Inside the coalesce window it is still the silent edit. A reply's row
+carries `thread_ts`, so `lastSent` is always the DM; a DM that is gone is
+answered by a fresh post. **The Home tab** is republished, debounced, when
+the lists change, every fifteen minutes for the time terms, and at boot.
+`/triage` matches `/triage-*` too, so a development app needs no setting.
+
+*Changed 2026-10-22: a worktree may talk to Slack.* The rule that kept
+every `SLACK_` line out of a worktree's `.env` is gone (AGENTS.md). A Slack
+mishap is noise rather than damage, there is one Slack and no sandbox, and
+an app or a webhook can be switched off by the workspace admin the moment
+it annoys. A development app made from the same manifest is the suggested
+way, because Socket Mode splits one app's events between its connections;
+production's own tokens are allowed too.
+
 The dependencies are already lazy (§16.2): the two imports are dynamic and
 sit behind `TRIAGE_SLACK=app`, so `npm run demo` and `npm test` need no
 `node_modules`. No change to `package.json` is needed for that; `npm ci`

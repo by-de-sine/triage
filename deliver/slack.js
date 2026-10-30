@@ -19,9 +19,21 @@
 //
 //   the interrupt   one DM per item to SLACK_USER_ID within a minute: title,
 //        repo, who did what, one line of the comment, Open · Done · Snooze
-//        1h · Snooze 1d · Later · Mute thread. A press updates the DM in
-//        place. Which verdicts interrupt is deliver/interrupts.js — a rule
-//        list, per source, not a tier.
+//        1h · Snooze 1d · Later · Mute thread. Which verdicts interrupt is
+//        deliver/interrupts.js — a rule list, per source, not a tier.
+//   the item's message   (G5, plan §16.5) that DM is where the item lives
+//        from then on. It is redrawn from the item's state whenever the
+//        item moves — a press, and the moves nobody pressed for: resolved
+//        by its source, woken from a snooze, reopened by new activity, a
+//        newer verdict (`moved`). A later interrupt on the same item is
+//        folded into it: inside the coalesce window the DM is updated in
+//        place; after it, the DM is updated *and* the new interrupt is a
+//        reply in its thread, broadcast to the conversation so it notifies.
+//        One message per item carries the buttons, so there is one thing to
+//        keep current.
+//   the Home tab   republished whenever the lists change (debounced), and
+//        every fifteen minutes so the time terms of the rank show, rather
+//        than drawn only when it is opened.
 //   everything else   is placed in the list and never sent. The P1 batch
 //        and the P2 digest are gone (plan §11.3; decided 2026-09-12):
 //        once the list is the surface, the list is the channel, and a
@@ -67,7 +79,7 @@
 // and a user id delivery is disabled and every interrupt is logged as not
 // delivered.
 import { p0Message } from './blocks.js';
-import { registerHandlers, actedMessage } from './handlers.js';
+import { registerHandlers, itemMessage } from './handlers.js';
 import { webhookClient, webhookHost, MODES as NOTIFY_MODES } from './notify.js';
 import { SHAPES } from './messages.js';
 import { INTERRUPTS, interrupts as mayInterrupt, allows as mayInterruptWhy } from './interrupts.js';
@@ -101,7 +113,7 @@ const hours = (ms) => Math.round(ms / 3_600_000);
 const where = (channel, ts) => (ts ? `${channel} ${ts}` : channel);
 
 export class SlackDelivery {
-  constructor(store, { mode = null, notify = null, webhookUrl = null, botToken, appToken, userId, user = null, quiet = '23:00-07:00', tz = Intl.DateTimeFormat().resolvedOptions().timeZone, coalesceMs = 600_000, maxAgeMs = 86_400_000, interrupts = INTERRUPTS, projects = {}, mention = null, rank = null, client = null, now = () => new Date(), log = () => {} } = {}) {
+  constructor(store, { mode = null, notify = null, webhookUrl = null, botToken, appToken, userId, user = null, quiet = '23:00-07:00', tz = Intl.DateTimeFormat().resolvedOptions().timeZone, coalesceMs = 600_000, maxAgeMs = 86_400_000, interrupts = INTERRUPTS, projects = {}, mention = null, rank = null, client = null, homeDelayMs = 2_000, homeEveryMs = 900_000, now = () => new Date(), log = () => {} } = {}) {
     this.store = store;
     // Which shape the webhook posts (deliver/messages.js). `slack` unless
     // told otherwise, which is what every webhook before G2 was; `off` is
@@ -143,6 +155,12 @@ export class SlackDelivery {
     this.timer = null;
     this.act = null;
     this.locks = new Map();   // per item: the last redraw of its DM, so two never race
+    this.drawn = new Map();   // per DM: what this process last drew there, so an unchanged redraw is not sent
+    this.handlers = null;     // what registerHandlers returned: publishHome
+    this.homeDelayMs = homeDelayMs;
+    this.homeEveryMs = homeEveryMs;
+    this.homeTimer = null;
+    this.homeAt = 0;
   }
 
   /** Redraws of one item's DM run one after another: a coalesced repeat
@@ -152,7 +170,10 @@ export class SlackDelivery {
     const prev = this.locks.get(itemId) || Promise.resolve();
     const next = prev.catch(() => {}).then(fn);
     this.locks.set(itemId, next);
-    next.finally(() => { if (this.locks.get(itemId) === next) this.locks.delete(itemId); });
+    // Both ways, so the cleanup is never a second, unhandled copy of a
+    // failure the caller already answers — Node exits on one of those.
+    const done = () => { if (this.locks.get(itemId) === next) this.locks.delete(itemId); };
+    next.then(done, done);
     return next;
   }
 
@@ -233,6 +254,8 @@ export class SlackDelivery {
         await this.app.start();
         this.client = this.app.client;
         this.log('slack: socket mode connected — buttons, /triage and the Home tab are live');
+        // The tab is current from boot, not from the first time it is opened.
+        await this.refreshHome().catch((e) => this.log(`slack: home — ${e.data?.error || e.message}`));
       } else {
         const { WebClient } = await import('@slack/web-api');
         this.client = new WebClient(this.botToken);
@@ -242,9 +265,9 @@ export class SlackDelivery {
     this.timer = setInterval(() => this.tick().catch((e) => this.log(`slack: tick — ${e.message}`)), 60_000);
   }
   registerHandlers(app) {
-    return registerHandlers(app, { store: this.store, act: (a) => { if (!this.act) throw new Error('no act() wired'); return this.act(a); }, user: this.user, userId: this.userId, rank: this.rank, now: this.now, log: this.log });
+    return this.handlers = registerHandlers(app, { store: this.store, act: (a) => { if (!this.act) throw new Error('no act() wired'); return this.act(a); }, user: this.user, userId: this.userId, rank: this.rank, now: this.now, log: this.log });
   }
-  async stop() { clearInterval(this.timer); if (this.app) await this.app.stop(); }
+  async stop() { clearInterval(this.timer); clearTimeout(this.homeTimer); this.homeTimer = null; if (this.app) await this.app.stop(); }
 
   /** The interrupt's message. In webhook mode it carries no act buttons:
    *  an incoming webhook delivers no interaction callbacks and this mode
@@ -315,9 +338,16 @@ export class SlackDelivery {
     // and `deliver` has already held the repeats that would have folded.
     const last = this.webhook ? null : this.store.lastSent(item.id);
     if (last && now - Date.parse(last.ts) < this.coalesceMs) {
-      await this.client.chat.update({ channel: last.channel, ts: last.message_ts, ...msg });
+      const body = this.#parent(item, decision, msg);
+      await this.#serial(item.id, () => this.client.chat.update({ channel: last.channel, ts: last.message_ts, ...body }));
+      this.drawn.delete(`${last.channel} ${last.message_ts}`);
       this.store.updateDelivery(last.id, { message_ts: last.message_ts, status: 'sent', decision_id: decision.id }, now.toISOString());
+      this.#homeSoon();
       return { delivered: true, note: `updated ${last.channel} ${last.message_ts} (coalesced)` };
+    }
+    if (last) {
+      const folded = await this.#fold(last, { item, decision, event }, msg, now);
+      if (folded) return folded;
     }
     // A webhook takes the payload as it is and answers with no message id;
     // the app posts to a DM and gets back the channel and `ts` a later
@@ -330,41 +360,150 @@ export class SlackDelivery {
     const channel = r.channel || this.channelName;
     if (held) this.store.updateDelivery(held.id, { channel, message_ts: r.ts, status: 'sent', decision_id: decision.id }, now.toISOString());
     else this.store.addDelivery({ item_id: item.id, channel, message_ts: r.ts, status: 'sent', decision_id: decision.id }, now.toISOString());
+    this.#homeSoon();
     // A webhook answers with the body `ok` and no message id, so there is
     // no `ts` to name here or to update later — the note says where, and
     // that is all there is to say.
     return { delivered: true, note: `sent ${where(channel, r.ts)}` };
   }
 
+  /** A later interrupt on an item that already has its DM, past the
+   *  coalesce window (G5). The DM is redrawn with the newer words and its
+   *  buttons, and the interrupt itself is a reply in the DM's thread with
+   *  `reply_broadcast`, so it notifies and shows in the conversation without
+   *  becoming a second message with buttons to keep current. The reply's
+   *  row carries `thread_ts`, so `lastSent` still finds the DM.
+   *
+   *  A DM that is gone — deleted by hand, a channel the bot left — makes
+   *  the reply fail; that is answered by posting fresh, which becomes the
+   *  item's message, and so returns null for `send` to carry on. */
+  async #fold(last, { item, decision, event }, msg, now) {
+    const reply = p0Message({ item, decision, event, interactive: false, mention: null });
+    let r;
+    try { r = await this.client.chat.postMessage({ channel: last.channel, thread_ts: last.message_ts, reply_broadcast: true, ...reply, unfurl_links: false }); }
+    catch (e) { this.log(`slack: ${item.key}: could not reply to ${last.channel} ${last.message_ts} (${e.data?.error || e.message}) — posting fresh`); return null; }
+    const parent = this.#parent(item, decision, msg);
+    this.drawn.delete(`${last.channel} ${last.message_ts}`);
+    // The reply went out, so this is delivered either way; a DM that could
+    // not be redrawn says so in `drawn`, and `moved` tries it again.
+    let drawn = true;
+    try { await this.#serial(item.id, () => this.client.chat.update({ channel: last.channel, ts: last.message_ts, ...parent })); }
+    catch (e) { drawn = false; this.log(`slack: ${item.key}: could not redraw ${last.channel} ${last.message_ts} — ${e.data?.error || e.message}`); }
+    const nowIso = now.toISOString();
+    this.store.updateDelivery(last.id, { message_ts: last.message_ts, status: 'sent', decision_id: decision.id }, nowIso);
+    const held = this.store.heldDeliveries().find((d) => d.item_id === item.id) || null;
+    const row = { channel: r.channel || last.channel, message_ts: r.ts, thread_ts: last.message_ts, status: 'sent', decision_id: decision.id };
+    if (held) this.store.updateDelivery(held.id, row, nowIso);
+    else this.store.addDelivery({ item_id: item.id, ...row }, nowIso);
+    this.#homeSoon();
+    return { delivered: true, drawn, note: `followed up in ${last.channel} ${last.message_ts} (reply ${r.ts})` };
+  }
+
+  /** The DM an interrupt writes, drawn as every redraw is — from the item's
+   *  state, so a wake or a reopen says so above the buttons — once the
+   *  decision is the store's; a decision only the caller holds is drawn as
+   *  it was handed over. */
+  #parent(item, decision, msg) {
+    const stored = this.store.decisionsFor(item.id).some((d) => d.id === decision.id);
+    return stored ? itemMessage(this.store, this.store.item(item.id) || item, decision.id) : msg;
+  }
+
+  /** Redraw the item's DM from where the item stands now. Nothing when it
+   *  has none, or under the webhook, whose messages cannot be redrawn — and
+   *  nothing when it would draw what this process last drew there: a verdict
+   *  on a Later item, say, changes nothing the DM shows. */
+  async redraw(item) {
+    if (!this.enabled || !this.client || this.webhook) return false;
+    return this.#serial(item.id, async () => {
+      const last = this.store.lastSent(item.id);
+      if (!last) return false;
+      const msg = itemMessage(this.store, this.store.item(item.id) || item, last.decision_id);
+      const key = `${last.channel} ${last.message_ts}`, body = JSON.stringify(msg);
+      if (this.drawn.get(key) === body) return false;
+      await this.client.chat.update({ channel: last.channel, ts: last.message_ts, ...msg });
+      this.drawn.set(key, body);
+      return true;
+    });
+  }
+
+  /** The item moved and nobody pressed anything (G5): its source resolved
+   *  it, the snooze ended, new activity reopened it, a newer verdict landed.
+   *  The pipeline and the runner call this for every item they change;
+   *  `drawn` says delivery has just written the DM itself, so it is not
+   *  redrawn twice. A held message for an item that is no longer open is
+   *  dropped, as it is after a press. Never throws: a move is already
+   *  stored, and a DM that could not follow is a log line. */
+  async moved({ item, drawn = false } = {}) {
+    if (!item) return false;
+    const current = this.store.item(item.id) || item;
+    if (current.state !== 'open') this.#drop(current, `${current.state} before the held message went out`);
+    let ok = false;
+    if (!drawn) {
+      try { ok = await this.redraw(current); }
+      catch (e) { this.log(`slack: ${current.key}: could not redraw the DM — ${e.data?.error || e.message}`); }
+    }
+    this.#homeSoon();
+    return ok;
+  }
+
+  #drop(item, why) {
+    const now = this.now();
+    for (const h of this.store.heldDeliveries().filter((d) => d.item_id === item.id)) this.store.updateDelivery(h.id, { status: 'dropped', decision_id: h.decision_id, error: why }, now.toISOString());
+  }
+
+  /** Can the Home tab be drawn: the app path, connected, handlers on. */
+  get home() { return !this.webhook && this.enabled && !!this.client && !!this.handlers && !!this.userId; }
+
+  /** Republish the Home tab now. */
+  async refreshHome() {
+    if (!this.home) return false;
+    clearTimeout(this.homeTimer); this.homeTimer = null;
+    // A publish that failed leaves the next tick to try again, rather than
+    // waiting out the fifteen minutes since the last one that worked.
+    try { await this.handlers.publishHome(this.client, this.userId); }
+    catch (e) { this.homeAt = 0; throw e; }
+    this.homeAt = this.now().getTime();
+    return true;
+  }
+
+  /** The lists changed: republish the Home tab shortly. A poll that moves
+   *  thirty items is one publish, not thirty. */
+  #homeSoon() {
+    if (!this.home || this.homeTimer) return;
+    this.homeTimer = setTimeout(() => { this.homeTimer = null; this.refreshHome().catch((e) => this.log(`slack: home — ${e.data?.error || e.message}`)); }, this.homeDelayMs);
+    this.homeTimer.unref?.();
+  }
+  /** Whether a republish is waiting — for the tests. */
+  get homePending() { return !!this.homeTimer; }
+
   /** After an action, from any surface: the DM that carries the item says
    *  what was done and loses its buttons. A held P0 is dropped — you have
    *  already dealt with it. */
   async reflect(result) {
     const { item } = result;
-    const now = this.now();
     // Dropping what is held still matters in both modes — you have dealt
     // with the item, so the follow-up must not arrive. The row does not say
     // which window was holding it (quiet, or coalescing), and it does not
     // need to.
-    for (const h of this.store.heldDeliveries().filter((d) => d.item_id === item.id)) this.store.updateDelivery(h.id, { status: 'dropped', decision_id: h.decision_id, error: `${result.action} before the held message went out` }, now.toISOString());
+    this.#drop(item, `${result.action} before the held message went out`);
     if (!this.enabled || !this.client) return false;
     // Webhook mode: the message stands as sent. It cannot be rewritten to
     // say what you then did, and acting happens on the page, which is where
     // §11 put it anyway. Explicitly nothing, not a swallowed throw.
     if (this.webhook) return false;
-    return this.#serial(item.id, async () => {
-      const last = this.store.lastSent(item.id);
-      if (!last) return false;
-      await this.client.chat.update({ channel: last.channel, ts: last.message_ts, ...actedMessage(this.store, result, now, last.decision_id) });
-      return true;
-    });
+    this.#homeSoon();
+    return this.redraw(item);
   }
 
   /** Once a minute: what the quiet window or a coalesce window held, once
    *  it ends. That is the whole of the timer now. */
   async tick() {
     const flushed = await this.flush();
-    return { flushed };
+    // The rank has a time term, so the order moves with nothing happening;
+    // a Home tab left alone for a quarter of an hour is redrawn.
+    let home = false;
+    if (this.home && this.now().getTime() - this.homeAt >= this.homeEveryMs) home = await this.refreshHome().catch((e) => { this.log(`slack: home — ${e.data?.error || e.message}`); return false; });
+    return { flushed, home };
   }
 
   /** Send what the quiet window held, once it is over. One message per item. */
@@ -391,6 +530,7 @@ export class SlackDelivery {
       try {
         const r = await this.send({ item, decision, event }, now);
         if (decision) this.store.markDelivered(decision.id, true, r.note + why);
+        if (r.drawn === false) await this.moved({ item });
         n++;
       } catch (e) {
         this.store.updateDelivery(d.id, { status: 'failed', decision_id: d.decision_id, error: e.message }, now.toISOString());
