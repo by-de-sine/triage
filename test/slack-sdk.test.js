@@ -3,7 +3,8 @@
 // them to the contract `deliver/` relies on: how a failed call is shaped
 // (`e.data.error` is what the logs say), what a sent message comes back
 // with (`r.channel`, `r.ts` is what the delivery row records), that a
-// socket-mode App builds offline and takes our handlers, and that a command
+// socket-mode App builds offline, posts through a client with the methods
+// we call, takes our handlers, and that a command
 // and a button travel Bolt's own pipeline into them. It is what makes a
 // Dependabot bump reviewable: a major version that moves any of this fails
 // here, in CI's `install` job, before anyone reads a changelog. Without
@@ -63,8 +64,14 @@ test('the Slack SDKs honour the contract deliver/ relies on — shapes, an offli
     // bolt: the App as `deliver/slack.js` builds it, with no network until
     // start() — which this test never calls.
     const app = new App({ token: 'xoxb-fake', appToken: 'xapp-fake', socketMode: true, logLevel: 'error', clientOptions: { slackApiUrl: slack.url, retryConfig: { retries: 0 } } });
-    assert.ok(app.client instanceof WebClient, 'app.client is the WebClient deliver/ posts through');
     for (const m of ['action', 'command', 'event', 'start', 'stop']) assert.equal(typeof app[m], 'function', `app.${m}`);
+    // `app.client` is what deliver/ posts through once the App is up. Held to
+    // what it does, not to which copy of web-api Bolt resolved: npm may nest
+    // one under Bolt when the two packages move apart.
+    for (const [group, method] of [['chat', 'postMessage'], ['chat', 'update'], ['views', 'publish']]) assert.equal(typeof app.client[group][method], 'function', `app.client.${group}.${method}`);
+    const viaApp = await app.client.chat.postMessage({ channel: 'D1', text: 'hi' });
+    assert.equal(viaApp.ts, '1700000000.000100', 'and answers with the same shape');
+    assert.equal(slack.calls.at(-1).auth, 'Bearer xoxb-fake', 'under the bot token the App was built with');
 
     // Our handlers, registered on the real App and reached through Bolt's
     // own dispatch: a stranger's command is answered in place, a button is
