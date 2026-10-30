@@ -96,10 +96,12 @@ test('seen changes nothing but writes the row, by whoever ticked', async () => {
   assert.equal(r.marked, null, 'nothing is marked at the far end');
   const [a] = store.actionsFor(item.id);
   assert.deepEqual([a.action, a.by, a.until, a.data], ['seen', 'seat', null, {}]);
-  assert.equal(reflected[0].action, 'seen', 'a DM that carried the item is told');
+  assert.deepEqual(reflected, [], 'the DM is not redrawn: it keeps its buttons, and what the delivery holds is not dropped — nothing was dealt with');
   // A second look is a second row; a Later item stays later.
   await act({ id: item.id, action: 'later' });
+  assert.equal(reflected.length, 1, 'later is reflected, as every state change is');
   await act({ id: item.id, action: 'seen' });
+  assert.equal(reflected.length, 1, 'seen on a later item is still not');
   assert.equal(store.item(item.id).state, 'later');
   assert.deepEqual(store.actionsFor(item.id).map((x) => x.action), ['seen', 'later', 'seen']);
 });
