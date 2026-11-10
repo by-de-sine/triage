@@ -328,7 +328,7 @@ test('through the runner: with no repositories the source is the inbox alone, an
 // request, and it goes quiet about a thread the moment the thread does —
 // so on one real queue, two months in, nine of every ten "open" threads
 // were closed on GitHub, and nine of the ten ranked highest.
-import { SWEEP_PER_POLL, SWEEP_EVERY_MS, SETTLE_AFTER_MS } from '../sources/github.js';
+import { SWEEP_PER_POLL, SWEEP_EVERY_MS, SETTLE_AFTER_MS, CLOSE_SLACK_MS } from '../sources/github.js';
 
 const HOUR = 3_600_000;
 /** The inbox's pull request #1 (yours; ann and bob have spoken on it) and
@@ -421,6 +421,13 @@ test('a closed thread somebody has spoken on since is still someone waiting; one
   assert.equal(set.governs(quiet), true);
   assert.equal(set.reason(quiet), 'closed on GitHub, and nothing since that needs you');
   assert.equal(set.governs({ ...quiet, tier: 'P0', last_activity: '2026-09-01T05:00:00Z' }), true, 'a P0 from before the close went with it');
+  // A reviewer approves and merges in one breath, and the notification that
+  // says so is stamped a moment after the merge: that is the close, not
+  // somebody speaking after it.
+  const breath = (ms) => new Date(Date.parse('2026-09-01T06:00:00Z') + ms).toISOString();
+  assert.equal(set.governs({ ...quiet, tier: 'P1', last_activity: breath(2_000) }), true);
+  assert.equal(set.governs({ ...quiet, tier: 'P1', last_activity: breath(CLOSE_SLACK_MS) }), true);
+  assert.equal(set.governs({ ...quiet, tier: 'P1', last_activity: breath(CLOSE_SLACK_MS + 1_000) }), false, 'later than that, it is a person');
 });
 
 test('the sweep is a budget, the oldest answer first; it stands down when the rate limit is low, and never costs the poll', async () => {

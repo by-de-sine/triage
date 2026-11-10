@@ -36,7 +36,7 @@ each (`GET /repos/:repo/issues/:n`).
 | still open | remembered, and asked again in six hours |
 | closed or merged, and that is the last thing that happened | the item gets the `state` event the inbox would have brought, and the rules re-tier it: your own pull request becomes "your pull was merged" (P2); a thread you were only in becomes ambient. A stale "someone is waiting" leaves the top of the list at once |
 | closed for a day, with nothing since that needs you | **resolved by the source** — `resolved`, `by = source:github`, "merged on GitHub, and nothing since that needs you" — and never asked about again. New activity reopens it like any done item |
-| closed, but somebody has spoken on it since and it is P0 or P1 | left where it is: a reply after a close is a person waiting |
+| closed, but somebody has spoken on it since and it is P0 or P1 | left where it is: a reply after a close is a person waiting. "Since" is more than five minutes after — an approval and the merge that follows it are one act, and the notification of a close is stamped a moment after it |
 | cannot be read (gone, moved, a token this box does not hold) | left alone, asked again in a day. Not knowing is not closed |
 
 Issues the open set governs are the open set's and are never swept. The

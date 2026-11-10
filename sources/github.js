@@ -59,6 +59,12 @@ export const SWEEP_RETRY_MS = 24 * 3_600_000;
 /** How long a closed thread stays in the list: a day, which is what "worth
  *  knowing today" (P2) means for the news that it closed. */
 export const SETTLE_AFTER_MS = 24 * 3_600_000;
+/** How far behind a close the thread's own bookkeeping may trail and still
+ *  be the close: the notification that says "merged" is stamped a moment
+ *  after the merge, and a reviewer who approves and merges does both inside
+ *  a minute. Activity later than this after a close is somebody speaking on
+ *  a closed thread; activity inside it is the close. */
+export const CLOSE_SLACK_MS = 5 * 60_000;
 const lower = (s) => String(s || '').toLowerCase();
 
 export function itemKey(n) {
@@ -182,7 +188,9 @@ export default {
       const e = swept[item.key];
       if (!e?.closed_at || inOpenSet(item)) return false;
       if (t - Date.parse(e.closed_at) < SETTLE_AFTER_MS) return false;
-      const since = Date.parse(item.last_activity) > Date.parse(e.closed_at);   // parsed: the two ends do not spell an instant alike
+      // Parsed, because the two ends do not spell an instant alike; and with
+      // slack, because the notification of a close trails the close.
+      const since = Date.parse(item.last_activity) - Date.parse(e.closed_at) > CLOSE_SLACK_MS;
       return !(since && (item.tier === 'P0' || item.tier === 'P1'));
     };
     return {
@@ -309,13 +317,13 @@ async function sweep({ api, prev, unfinished = null, moved = new Set(), now, log
     const state = merged_at ? 'merged' : 'closed';
     const actor = s.closed_by?.login || null;
     // The event is handed back only when the close is the last thing that
-    // happened. The rules judge what is fresh, and a close found late is
+    // happened (give or take the moment its own notification trails it by). The rules judge what is fresh, and a close found late is
     // fresh whenever it happened: one from before a reply would be read as
     // the newest word on the thread and take "ann replied to you" down to
     // "your pull was closed". When something has happened since, the item's
     // verdict is already about that, and only its state is corrected.
     const last = Date.parse(i.last_activity);
-    const latest = !Number.isFinite(last) || Date.parse(closed_at) >= last;
+    const latest = !Number.isFinite(last) || last - Date.parse(closed_at) <= CLOSE_SLACK_MS;
     batches.push({
       item: { key: i.key, kind: i.kind, title: s.title || i.title, url: i.url, repo: i.repo, actors: i.actors, my_role: i.my_role, last_activity: i.last_activity, last_seen: nowIso, data: { ...i.data, state } },
       events: !latest ? [] : [merged_at
