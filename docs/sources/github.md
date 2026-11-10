@@ -29,7 +29,9 @@ pull request, and it goes quiet about a thread the moment the thread does
 — so an item the inbox opened would stay open here long after GitHub
 closed it. So on every poll the source asks GitHub about a few of its own
 unfinished threads: ten at most, the one asked longest ago first, one call
-each (`GET /repos/:repo/issues/:n`).
+each — `GET /repos/:repo/pulls/:n` for a pull request, `…/issues/:n` for
+an issue, so a per-owner token needs only the permission the inbox already
+needed for that thread.
 
 | GitHub says | Here |
 |---|---|

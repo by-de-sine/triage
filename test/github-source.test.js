@@ -332,13 +332,17 @@ import { SWEEP_PER_POLL, SWEEP_EVERY_MS, SETTLE_AFTER_MS, CLOSE_SLACK_MS } from 
 
 const HOUR = 3_600_000;
 /** The inbox's pull request #1 (yours; ann and bob have spoken on it) and
- *  issue #2 (ann mentioned you), with what `GET /repos/o/r/issues/:n` says
- *  about each — the one call the sweep makes. */
+ *  issue #2 (ann mentioned you). `over` is what GitHub says about the pull
+ *  request now — the one call the sweep makes for it, to the pull request
+ *  itself. */
 function swept(over = {}) {
   const rt = routes();
-  rt['/repos/o/r/issues/1'] = { ...issue({ repo: 'o/r', number: 1, title: 'A PR', author: ME, created_at: '2026-09-01T00:00:00Z' }), html_url: 'https://github.com/o/r/pull/1', pull_request: { merged_at: null }, ...over };
+  rt['/repos/o/r/pulls/1'] = { ...rt['/repos/o/r/pulls/1'], ...over };
   return rt;
 }
+/** How many times the sweep's own question about thread `n` was asked: the
+ *  bare subject, which the inbox also reads when the thread moves. */
+const askedAbout = (api, n) => api.calls.filter((u) => new RegExp(`/repos/o/r/(pulls|issues)/${n}$`).test(u)).length;
 const bootInbox = (rt) => boot(rt, { repos: [], everyMs: 0 });
 
 test('the sweep asks about the inbox\'s unfinished threads, and a pull request you merged yourself stops being someone waiting', async () => {
@@ -347,20 +351,22 @@ test('the sweep asks about the inbox\'s unfinished threads, and a pull request y
   let r = await runner.run('github');
   const pr = store.itemByKey(ME, 'github', 'o/r#1'), is = store.itemByKey(ME, 'github', 'o/r#2');
   assert.equal(pr.tier, 'P0', 'ann and bob spoke after you did');
-  assert.equal(api.calls.filter((u) => /\/repos\/o\/r\/issues\/\d+$/.test(u)).length, 1, 'not asked about in the poll that read them: the inbox has just said how they stand (the one call is the inbox reading issue #2)');
+  assert.deepEqual([askedAbout(api, 1), askedAbout(api, 2)], [1, 1], 'once each, by the inbox: the sweep does not ask about a thread in the poll that has just read it');
   // Still open: asked once, remembered, and not asked again for six hours.
   tick(1); api.calls.length = 0;
   r = await runner.run('github');
   assert.match(r.status, /sweep: asked about 2, 0 closed/);
+  assert.deepEqual([askedAbout(api, 1), askedAbout(api, 2)], [1, 1]);
+  assert.ok(api.calls.some((u) => /\/repos\/o\/r\/pulls\/1$/.test(u)) && !api.calls.some((u) => /\/repos\/o\/r\/issues\/1$/.test(u)), 'a pull request is asked about as a pull request: a fine-grained token may read those and not issues');
   assert.deepEqual(Object.keys(store.cursor('github').sweep).sort(), ['o/r#1', 'o/r#2']);
   assert.equal(store.cursor('github').sweep['o/r#1'].closed_at, null);
   assert.equal(r.reconciled.resolved.length, 0);
   tick(60); api.calls.length = 0;
   r = await runner.run('github');
-  assert.equal(api.calls.filter((u) => /\/issues\/\d+$/.test(u)).length, 0, 'an hour on: nothing to ask');
+  assert.deepEqual([askedAbout(api, 1), askedAbout(api, 2)], [0, 0], 'an hour on: nothing to ask');
   assert.ok(!/sweep/.test(r.status), 'and nothing to say about it');
   // You merge it. GitHub tells nobody — least of all your own inbox.
-  rt['/repos/o/r/issues/1'] = { ...rt['/repos/o/r/issues/1'], state: 'closed', closed_at: '2026-09-02T08:00:00Z', closed_by: { login: ME }, pull_request: { merged_at: '2026-09-02T08:00:00Z' } };
+  rt['/repos/o/r/pulls/1'] = { ...rt['/repos/o/r/pulls/1'], state: 'closed', merged: true, merged_at: '2026-09-02T08:00:00Z', closed_at: '2026-09-02T08:00:00Z', merged_by: { login: ME } };
   tick(SWEEP_EVERY_MS / 60_000); api.calls.length = 0;
   r = await runner.run('github');
   assert.match(r.status, /sweep: asked about 2, 1 closed/);
@@ -377,7 +383,7 @@ test('the sweep asks about the inbox\'s unfinished threads, and a pull request y
   tick(SETTLE_AFTER_MS / 60_000); api.calls.length = 0;
   r = await runner.run('github');
   assert.deepEqual(r.reconciled.resolved, ['o/r#1']);
-  assert.equal(api.calls.filter((u) => /\/issues\/1$/.test(u)).length, 0, 'a thread found closed is never asked about again');
+  assert.equal(askedAbout(api, 1), 0, 'a thread found closed is never asked about again');
   const act = store.actionsFor(pr.id).at(-1);
   assert.deepEqual([act.action, act.by, act.data.reason], ['resolved', 'source:github', 'merged on GitHub, and nothing since that needs you']);
   assert.equal(store.item(is.id).state, 'open', 'the issue is still open there, and so here');
@@ -389,12 +395,10 @@ test('the sweep asks about the inbox\'s unfinished threads, and a pull request y
 });
 
 test('a closed thread somebody has spoken on since is still someone waiting; one you cannot read is left alone; neither is resolved', async () => {
-  const rt = swept({ state: 'closed', closed_at: '2026-09-01T06:00:00Z', closed_by: { login: 'bob' } });
-  delete rt['/repos/o/r/issues/2'];   // the inbox read it once; now it is gone, or private
+  const rt = swept({ state: 'closed', closed_at: '2026-09-01T06:00:00Z' });
   const { store, runner, api, tick } = bootInbox(rt);
-  rt['/repos/o/r/issues/2'] = issue({ repo: 'o/r', number: 2, title: 'An issue', author: 'ann', created_at: '2026-09-02T00:30:00Z' });
   await runner.run('github');
-  delete rt['/repos/o/r/issues/2'];
+  delete rt['/repos/o/r/issues/2'];   // the inbox read it once; now it is gone, or private
   const pr = store.itemByKey(ME, 'github', 'o/r#1'), is = store.itemByKey(ME, 'github', 'o/r#2');
   tick(1);
   let r = await runner.run('github');
@@ -415,7 +419,7 @@ test('a closed thread somebody has spoken on since is still someone waiting; one
   assert.equal(set.governs(store.item(is.id)), false);
   // The unreadable one is asked about once a day, not every poll.
   api.calls.length = 0; tick(60); await runner.run('github');
-  assert.equal(api.calls.filter((u) => /\/issues\/2$/.test(u)).length, 0);
+  assert.equal(askedAbout(api, 2), 0);
   // The same thread with nothing since the close that needs you is settled.
   const quiet = { ...store.item(pr.id), tier: 'P3' };
   assert.equal(set.governs(quiet), true);
@@ -436,7 +440,7 @@ test('the sweep is a budget, the oldest answer first; it stands down when the ra
   const n = SWEEP_PER_POLL * 2 + 3;
   for (let k = 1; k <= n; k++) {
     store.upsertItem({ user: ME, source: 'github', key: `o/r#${k}`, kind: 'pull', title: `PR ${k}`, url: `https://github.com/o/r/pull/${k}`, repo: 'o/r', last_activity: new Date(T0.getTime() - k * HOUR).toISOString(), data: { thread_id: String(k), state: 'open' } });
-    rt[`/repos/o/r/issues/${k}`] = { ...issue({ repo: 'o/r', number: k, title: `PR ${k}`, author: ME, created_at: '2026-08-01T00:00:00Z' }), pull_request: { merged_at: null } };
+    rt[`/repos/o/r/pulls/${k}`] = pull({ repo: 'o/r', number: k, title: `PR ${k}`, author: ME, created_at: '2026-08-01T00:00:00Z' });
   }
   // Not the sweep's: an issue the open set governs, a release, a done item.
   store.upsertItem({ user: ME, source: 'github', key: 'o/r#900', kind: 'issue', title: 'governed', repo: 'o/r', data: { mode: 'open' } });
@@ -446,7 +450,7 @@ test('the sweep is a budget, the oldest answer first; it stands down when the ra
   const logs = [];
   const runner = new Runner(store, [github], { user: ME, rules: { github: rules }, extras: { github: { api, issues: { repos: [], everyMs: 0 } } }, log: (m) => logs.push(m) });
   let now = T0; runner.now = () => now;
-  const asked = () => api.calls.filter((u) => /\/issues\/\d+$/.test(u)).map((u) => Number(u.split('/').pop()));
+  const asked = () => api.calls.filter((u) => /\/pulls\/\d+$/.test(u)).map((u) => Number(u.split('/').pop()));
   let r = await runner.run('github');
   assert.equal(asked().length, SWEEP_PER_POLL);
   assert.deepEqual(asked(), Array.from({ length: SWEEP_PER_POLL }, (_, k) => n - k), 'never asked first, and of those the longest quiet');
@@ -464,7 +468,7 @@ test('the sweep is a budget, the oldest answer first; it stands down when the ra
   // The far end falling over mid-sweep is the sweep's problem alone.
   delete rt.rateRemaining;
   const broken = Object.create(api);
-  broken.get = async (u, o) => { if (/\/issues\/\d+$/.test(u)) throw new Error('fetch failed'); return api.get(u, o); };
+  broken.get = async (u, o) => { if (/\/pulls\/\d+$/.test(u)) throw new Error('fetch failed'); return api.get(u, o); };
   runner.extras.github.api = broken;
   r = await runner.run('github');
   assert.equal(r.ok, true, 'the poll that carries the interrupts still ran');
@@ -474,7 +478,7 @@ test('the sweep is a budget, the oldest answer first; it stands down when the ra
 });
 
 test('with the open set on too, each speaks for its own; and while the open set cannot be read whole, nothing is resolved by anybody', async () => {
-  const rt = withIssues(swept({ state: 'closed', closed_at: '2026-08-20T00:00:00Z', closed_by: { login: ME }, pull_request: { merged_at: '2026-08-20T00:00:00Z' } }));
+  const rt = withIssues(swept({ state: 'closed', merged: true, merged_at: '2026-08-20T00:00:00Z', closed_at: '2026-08-20T00:00:00Z', merged_by: { login: ME } }));
   // Nobody has spoken on the pull request since it merged.
   rt['/repos/o/r/issues/1/comments'] = []; rt['/repos/o/r/pulls/1/comments'] = []; rt['/repos/o/r/pulls/1/reviews'] = [];
   rt['/notifications'][0].updated_at = '2026-08-19T00:00:00Z';
@@ -487,7 +491,7 @@ test('with the open set on too, each speaks for its own; and while the open set 
   assert.equal(store.cursor('github').sweep['o/r#40'], undefined, 'and the sweep never asks about them');
   // A second stale thread, and an open set that fails: the old rule holds.
   store.upsertItem({ user: ME, source: 'github', key: 'o/r#7', kind: 'pull', title: 'Another', repo: 'o/r', last_activity: '2026-08-01T00:00:00Z', data: { thread_id: '7', state: 'open' } });
-  rt['/repos/o/r/issues/7'] = { ...issue({ repo: 'o/r', number: 7, title: 'Another', author: 'ann', created_at: '2026-07-01T00:00:00Z', state: 'closed', closed_at: '2026-08-02T00:00:00Z' }), pull_request: { merged_at: null } };
+  rt['/repos/o/r/pulls/7'] = pull({ repo: 'o/r', number: 7, title: 'Another', author: 'ann', created_at: '2026-07-01T00:00:00Z', state: 'closed', closed_at: '2026-08-02T00:00:00Z' });
   delete rt['/repos/o/r/issues'];
   tick(6);
   r = await runner.run('github');

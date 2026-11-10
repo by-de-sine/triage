@@ -25,7 +25,7 @@
 // In the first two months that was nine of every ten open threads, and
 // nine of the ten ranked highest. So a few of the source's own unfinished
 // threads are asked about on every poll, oldest answer first: one call
-// each. A thread found closed gets the `state` event the inbox would have
+// each, to the pull request or the issue itself. A thread found closed gets the `state` event the inbox would have
 // brought (the same key, so the two never double it), and the rules re-tier
 // it like any other event; one that has been closed a day with nothing
 // since that needs you leaves the set `reconcile` reports, and is resolved
@@ -298,8 +298,13 @@ async function sweep({ api, prev, unfinished = null, moved = new Set(), now, log
   for (const i of due.slice(0, SWEEP_PER_POLL)) {
     if (api.rate.remaining != null && api.rate.remaining < 50) { log(`sweep: rate limit low (${api.rate.remaining}); ${due.length - asked} threads left for a later poll`); break; }
     const [repo, num] = i.key.split('#');
+    // A pull request is asked about as a pull request, not through the
+    // issues endpoint that also answers for it: a fine-grained token is
+    // granted the two separately, so this needs only what the inbox already
+    // needed to read the thread — and the pull request says who merged it.
+    const pull = i.kind === 'pull';
     let s;
-    try { s = (await api.get(`/repos/${repo}/issues/${num}`)).body; }
+    try { s = (await api.get(`/repos/${repo}/${pull ? 'pulls' : 'issues'}/${num}`)).body; }
     catch (e) {
       // A refusal is an answer about this thread; anything else is about
       // the far end, and the next poll asks again.
@@ -309,13 +314,13 @@ async function sweep({ api, prev, unfinished = null, moved = new Set(), now, log
       continue;
     }
     asked++;
-    const merged_at = s.pull_request?.merged_at || null;
+    const merged_at = pull ? s.merged_at || null : null;
     const closed_at = s.state === 'closed' ? merged_at || s.closed_at || nowIso : null;
     next[i.key] = { at: nowIso, closed_at };
     if (!closed_at) continue;
     closed++;
     const state = merged_at ? 'merged' : 'closed';
-    const actor = s.closed_by?.login || null;
+    const actor = (merged_at ? s.merged_by?.login : s.closed_by?.login) || null;
     // The event is handed back only when the close is the last thing that
     // happened (give or take the moment its own notification trails it by). The rules judge what is fresh, and a close found late is
     // fresh whenever it happened: one from before a reply would be read as
