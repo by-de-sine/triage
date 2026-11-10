@@ -55,13 +55,13 @@ Open the brief
 ```
 
 It is [the brief the page opens on](using.md#the-brief): at most five from
-this week and three that crossed a line today by name, and everything else
-as a count.
+this week and three that crossed a line today by name — the highest-ranked,
+when more did — and everything else as a count.
 
 | | |
 |---|---|
 | **Once a local day** | at the hour or after, so a box that was down at eight sends it when it is back |
-| **Never in the quiet window** | one that comes back at midnight waits for morning |
+| **Never in the quiet window** | one that comes back at midnight waits for morning. A `TRIAGE_BRIEF` that is itself inside the quiet window means the minute the window ends: `23:30` against `23:00-07:00` is a brief at 07:00, and the boot log and `/healthz` say so |
 | **Nothing to say, nothing sent** | a day with no item to name and every source reading sends no message. A count of what is still waiting is yesterday's count |
 | **It names you** | on a webhook the configured `TRIAGE_MENTION` leads it, as on an interrupt; under the app it is a DM |
 | **A failed post** | is tried on the next two ticks, then left: tomorrow's says it again |
@@ -214,7 +214,7 @@ curl -s 'localhost:3300/api/interrupts?source=github&rule=new_issue&project=acme
 | `TRIAGE_TZ` | the system zone | for the quiet window and the reports |
 | `TRIAGE_COALESCE_MIN` | `10` | the coalesce window |
 | `TRIAGE_DELIVER_MAX_AGE_H` | `24` | the age guard |
-| `TRIAGE_BRIEF` | `08:00` | when [the brief](#the-brief) goes out, as `HH:MM` in `TRIAGE_TZ`, or `off`. Anything else is refused at boot |
+| `TRIAGE_BRIEF` | `08:00` | when [the brief](#the-brief) goes out, as `HH:MM` in `TRIAGE_TZ`, or `off`. Anything else is refused at boot. An hour inside `TRIAGE_QUIET` goes when the window ends |
 | `TRIAGE_URL` | — | where the page is published, for the link the brief ends with. A link, never fetched |
 | `TRIAGE_INTERRUPT` | — | layer 3: statements, comma-separated. `off` interrupts on nothing; a source named with no rules interrupts on none |
 | `TRIAGE_PREFS` | `preferences.json` beside the `.env` | layers 1 and 2 |

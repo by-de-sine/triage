@@ -117,11 +117,17 @@ function localMinutes(d, tz) {
   const h = +parts.find((p) => p.type === 'hour').value % 24, mi = +parts.find((p) => p.type === 'minute').value;
   return h * 60 + mi;
 }
+/** Whether a minute of the local day is inside the quiet window. */
+const quietAt = (quiet, m) => !!quiet && (quiet.start < quiet.end ? m >= quiet.start && m < quiet.end : m >= quiet.start || m < quiet.end);
 export function inQuiet(quiet, d, tz) {
   if (!quiet) return false;
-  const m = localMinutes(d, tz);
-  return quiet.start < quiet.end ? m >= quiet.start && m < quiet.end : m >= quiet.start || m < quiet.end;
+  return quietAt(quiet, localMinutes(d, tz));
 }
+/** The minute of the local day the brief really goes at: its hour, or —
+ *  when that hour is inside the quiet window — the minute the window ends.
+ *  Without this an hour like 23:30 against 23:00-07:00 never came: too
+ *  early before it, quiet after it, and too early again in the morning. */
+export const briefMinute = (briefAt, quiet) => (briefAt != null && quietAt(quiet, briefAt) ? quiet.end : briefAt);
 
 const fmt = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 const hours = (ms) => Math.round(ms / 3_600_000);
@@ -527,7 +533,7 @@ export class SlackDelivery {
    *  one went. */
   describeBrief() {
     const last = this.store.cursor(BRIEF_CURSOR)?.history?.at(-1) || null;
-    return { at: this.briefAt == null ? null : fmt(this.briefAt), last: last ? { day: last.day, at: last.at, sent: last.sent, note: last.note, items: last.items.length } : null };
+    return { at: this.briefAt == null ? null : fmt(briefMinute(this.briefAt, this.quiet)), last: last ? { day: last.day, at: last.at, sent: last.sent, note: last.note, items: last.items.length } : null };
   }
 
   /** The brief as it stands, built the one way every surface builds it. */
@@ -542,7 +548,9 @@ export class SlackDelivery {
 
   /** The day's brief: once per local day, at or after `briefAt`, outside
    *  the quiet window — so a box that was down at eight sends it when it
-   *  comes back, and one that comes back at midnight waits for morning.
+   *  comes back, and one that comes back at midnight waits for morning. An
+   *  hour that is itself inside the quiet window means the minute the
+   *  window ends (`briefMinute`).
    *  **A day with nothing to say sends nothing**, and is still the day's
    *  brief: the cursor says it was quiet, so it is not asked again every
    *  minute. A post that fails is tried on the next ticks, three times in
@@ -555,7 +563,7 @@ export class SlackDelivery {
     const day = localDay(now, this.tz);
     const state = this.store.cursor(BRIEF_CURSOR) || { day: null, tries: 0, history: [] };
     if (!force) {
-      if (inQuiet(this.quiet, now, this.tz) || localMinutes(now, this.tz) < this.briefAt) return null;
+      if (inQuiet(this.quiet, now, this.tz) || localMinutes(now, this.tz) < briefMinute(this.briefAt, this.quiet)) return null;
       if (state.day === day && (state.done || state.tries >= BRIEF_TRIES)) return null;
     }
     const b = this.briefNow(now);

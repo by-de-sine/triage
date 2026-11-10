@@ -56,6 +56,11 @@ const ISSUE_PAGES = 10; // 1,000 open issues per repository; the same kind of ca
 export const SWEEP_PER_POLL = 10;
 export const SWEEP_EVERY_MS = 6 * 3_600_000;
 export const SWEEP_RETRY_MS = 24 * 3_600_000;
+/** A thread the far end did not answer about at all (a 5xx, a dropped
+ *  connection) is asked again this soon, and this many such answers in a
+ *  row end the pass: the far end is down, not the thread. */
+export const SWEEP_UNANSWERED_MS = 15 * 60_000;
+const SWEEP_GIVE_UP = 2;
 /** How long a closed thread stays in the list: a day, which is what "worth
  *  knowing today" (P2) means for the news that it closed. */
 export const SETTLE_AFTER_MS = 24 * 3_600_000;
@@ -210,7 +215,7 @@ export default {
     if (state.issues) out.issues = { repos: (state.issues.repos || []).length, open: (state.issues.open || []).length, complete: !!state.issues.complete, read_at: state.issues.read_at || null };
     if (state.sweep) {
       const es = Object.values(state.sweep);
-      out.sweep = { asked: es.length, closed: es.filter((e) => e.closed_at).length, unreadable: es.filter((e) => e.error).length };
+      out.sweep = { asked: es.filter((e) => !e.unanswered).length, closed: es.filter((e) => e.closed_at).length, unreadable: es.filter((e) => e.error).length };
     }
     return out;
   },
@@ -278,7 +283,9 @@ async function inbox({ api, prev, me, now, log, all = false, governed = new Set(
  *
  *  A thread it cannot read — gone, moved, or behind a token this box does
  *  not hold — is remembered as unreadable and left alone: not knowing is
- *  not the same as closed. */
+ *  not the same as closed. One the far end did not answer about is asked
+ *  again in a quarter of an hour, and what the pass had already learned is
+ *  kept either way. */
 async function sweep({ api, prev, unfinished = null, moved = new Set(), now, log }) {
   if (typeof unfinished !== 'function') return null;
   const items = unfinished().filter((i) => (i.kind === 'pull' || i.kind === 'issue') && i.data?.mode !== 'open' && /^[^#@]+\/[^#@]+#\d+$/.test(i.key));
@@ -287,14 +294,19 @@ async function sweep({ api, prev, unfinished = null, moved = new Set(), now, log
   // Only what is still unfinished is remembered: an item the sweep settled,
   // or you finished, leaves the cursor with it. If new activity reopens it,
   // it is asked about afresh.
+  // And what the inbox has just re-read is forgotten too: the thread moved,
+  // so whatever the sweep was told about it — closed, above all — may no
+  // longer be so. A thread reopened on GitHub would otherwise keep its old
+  // `closed_at` and be resolved while open there. It is asked about afresh
+  // on the next poll, which is one call.
   const next = {};
-  for (const i of items) if (was[i.key]) next[i.key] = was[i.key];
-  const dueAt = (i) => { const e = next[i.key]; return !e ? 0 : Date.parse(e.at) + (e.error ? SWEEP_RETRY_MS : SWEEP_EVERY_MS); };
+  for (const i of items) if (was[i.key] && !moved.has(i.key)) next[i.key] = was[i.key];
+  const dueAt = (i) => { const e = next[i.key]; return !e ? 0 : Date.parse(e.at) + (e.unanswered ? SWEEP_UNANSWERED_MS : e.error ? SWEEP_RETRY_MS : SWEEP_EVERY_MS); };
   // A thread found closed is never asked about again: closed is the end of
   // what the sweep is for, and a reopening arrives through the inbox.
   const due = items.filter((i) => !next[i.key]?.closed_at && !moved.has(i.key) && dueAt(i) <= t).sort((a, b) => dueAt(a) - dueAt(b) || (Date.parse(a.last_activity) || 0) - (Date.parse(b.last_activity) || 0));
   const batches = [];
-  let asked = 0, closed = 0;
+  let asked = 0, closed = 0, unanswered = 0;
   for (const i of due.slice(0, SWEEP_PER_POLL)) {
     if (api.rate.remaining != null && api.rate.remaining < 50) { log(`sweep: rate limit low (${api.rate.remaining}); ${due.length - asked} threads left for a later poll`); break; }
     const [repo, num] = i.key.split('#');
@@ -306,14 +318,29 @@ async function sweep({ api, prev, unfinished = null, moved = new Set(), now, log
     let s;
     try { s = (await api.get(`/repos/${repo}/${pull ? 'pulls' : 'issues'}/${num}`)).body; }
     catch (e) {
-      // A refusal is an answer about this thread; anything else is about
-      // the far end, and the next poll asks again.
-      if (!e.status) throw e;
+      // Three kinds of failure, and only one is about the thread.
+      //
+      // A rate limit — 429, or the 403 GitHub sends for a secondary one,
+      // which the remaining-calls header never shows — is the far end
+      // asking for quiet: the pass ends, and nothing is remembered, so the
+      // next poll asks again rather than in a day.
+      if (e.status === 429 || (e.status === 403 && /rate limit|abuse/i.test(e.message))) { log(`sweep: rate limited (${e.status}); ${due.length - asked} threads left for a later poll`); break; }
+      // No answer at all — a 5xx, a dropped connection. One thread GitHub
+      // cannot serve must not stand at the head of the queue for ever, so
+      // it is put back a quarter of an hour and the pass goes on; two in a
+      // row and it is the far end that is down, and the pass ends with what
+      // it has.
+      if (!e.status) {
+        next[i.key] = { at: nowIso, closed_at: null, unanswered: true };
+        if (++unanswered >= SWEEP_GIVE_UP) { log(`sweep: ${e.message} — ${unanswered} threads in a row unanswered; the rest are left for a later poll`); break; }
+        continue;
+      }
+      // Any other refusal is an answer about this thread.
       next[i.key] = { at: nowIso, error: e.status };
-      asked++;
+      asked++; unanswered = 0;
       continue;
     }
-    asked++;
+    asked++; unanswered = 0;
     const merged_at = pull ? s.merged_at || null : null;
     const closed_at = s.state === 'closed' ? merged_at || s.closed_at || nowIso : null;
     next[i.key] = { at: nowIso, closed_at };

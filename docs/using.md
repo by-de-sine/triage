@@ -15,7 +15,7 @@ shorter.
 | | |
 |---|---|
 | **needs you** | what needs you and began to this week, in rank order, five at a time (`and N more` shows the rest). Each row is the list's own row: the same sentence, the same buttons, and a choice's answers as buttons |
-| **slipping** | an older one, on the day it has waited 7, 14, 30, 60 or 90 days — said once as it crosses the line, then not until the next |
+| **slipping** | an older one, on the day it has waited 7, 14, 30, 60 or 90 days — said once as it crosses the line, then not until the next. Three at most, the highest-ranked; any others that crossed a line the same day stay in *still waiting* and are next named at their following line |
 | **still waiting on you** | every other item that needs you: a count and its oldest. Opens into its rows |
 | **yours, no date** | what is yours with no clock on it: a count and its oldest. Opens into its rows |
 | **folded away** | everything else — news, bots, other people's — as counts by the rule that put it there. A count is the list narrowed to that rule |

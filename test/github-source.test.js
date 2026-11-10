@@ -328,7 +328,7 @@ test('through the runner: with no repositories the source is the inbox alone, an
 // request, and it goes quiet about a thread the moment the thread does —
 // so on one real queue, two months in, nine of every ten "open" threads
 // were closed on GitHub, and nine of the ten ranked highest.
-import { SWEEP_PER_POLL, SWEEP_EVERY_MS, SETTLE_AFTER_MS, CLOSE_SLACK_MS } from '../sources/github.js';
+import { SWEEP_PER_POLL, SWEEP_EVERY_MS, SETTLE_AFTER_MS, CLOSE_SLACK_MS, SWEEP_UNANSWERED_MS } from '../sources/github.js';
 
 const HOUR = 3_600_000;
 /** The inbox's pull request #1 (yours; ann and bob have spoken on it) and
@@ -503,5 +503,86 @@ test('with the open set on too, each speaks for its own; and while the open set 
   r = await runner.run('github');
   assert.deepEqual(r.reconciled.resolved, ['o/r#7'], 'and when it reads whole again, what the sweep found is settled');
   assert.equal(store.actionsFor(store.itemByKey(ME, 'github', 'o/r#7').id).at(-1).data.reason, 'closed on GitHub, and nothing since that needs you');
+  store.close();
+});
+
+test('a thread reopened on GitHub is not resolved on an old answer: what the inbox re-reads, the sweep forgets and asks about afresh', async () => {
+  // An issue of somebody else's that you are only subscribed to: ambient,
+  // so nothing about its tier would keep it once it reads as closed.
+  const rt = { '/notifications': [notification({ id: 5, repo: 'o/r', type: 'Issue', number: 5, title: 'Flaky', reason: 'subscribed', updated_at: '2026-09-02T00:00:00Z' })],
+    '/repos/o/r/issues/5': issue({ repo: 'o/r', number: 5, title: 'Flaky', author: 'ann', created_at: '2026-08-30T00:00:00Z', state: 'closed', closed_at: '2026-09-02T00:00:00Z' }),
+    '/repos/o/r/issues/5/comments': [] };
+  const { store, runner, api, tick } = bootInbox(rt);
+  await runner.run('github');
+  tick(1); await runner.run('github');
+  assert.equal(store.cursor('github').sweep['o/r#5'].closed_at, '2026-09-02T00:00:00Z');
+  const it = store.itemByKey(ME, 'github', 'o/r#5');
+  assert.equal(it.state, 'open', 'inside the day');
+  // bob reopens it, and the inbox says so.
+  tick(60);
+  rt['/repos/o/r/issues/5'] = { ...rt['/repos/o/r/issues/5'], state: 'open', closed_at: null };
+  rt['/notifications'][0] = { ...rt['/notifications'][0], updated_at: '2026-09-02T04:01:00Z' };
+  rt.lastModified = 'Tue, 02 Sep 2026 04:01:00 GMT';
+  let r = await runner.run('github');
+  assert.equal(store.item(it.id).data.state, 'open');
+  assert.equal(store.cursor('github').sweep['o/r#5'], undefined, 'the old answer is forgotten in the poll that re-read the thread');
+  tick(1); api.calls.length = 0;
+  r = await runner.run('github');
+  assert.equal(askedAbout(api, 5), 1, 'and asked afresh on the next');
+  assert.equal(store.cursor('github').sweep['o/r#5'].closed_at, null);
+  // Two days on it is still here, where the old answer would have resolved it.
+  tick(2 * 24 * 60);
+  r = await runner.run('github');
+  assert.deepEqual(r.reconciled?.resolved || [], []);
+  assert.equal(store.item(it.id).state, 'open');
+  store.close();
+});
+
+test('one thread GitHub cannot serve does not stand at the head of the sweep, and what the pass learned is kept; a rate limit ends the pass and remembers nothing', async () => {
+  const rt = { '/notifications': [] };
+  const store = new Store();
+  for (let k = 1; k <= 6; k++) {
+    store.upsertItem({ user: ME, source: 'github', key: `o/r#${k}`, kind: 'pull', title: `PR ${k}`, url: `https://github.com/o/r/pull/${k}`, repo: 'o/r', last_activity: new Date(T0.getTime() - (10 - k) * HOUR).toISOString(), data: { thread_id: String(k), state: 'open' } });
+    rt[`/repos/o/r/pulls/${k}`] = pull({ repo: 'o/r', number: k, title: `PR ${k}`, author: ME, created_at: '2026-08-01T00:00:00Z', ...(k === 3 ? { state: 'closed', merged_at: '2026-08-10T00:00:00Z', closed_at: '2026-08-10T00:00:00Z' } : {}) });
+  }
+  const api = fakeApi(rt);
+  // #1 is the oldest and so the first asked: GitHub answers 502 for it, every time.
+  const sick = Object.create(api);
+  sick.get = async (u, o) => { if (/\/pulls\/1$/.test(u)) { api.calls.push(u); throw new Error('GitHub 502 on GET /repos/o/r/pulls/1'); } return api.get(u, o); };
+  const logs = [];
+  const runner = new Runner(store, [github], { user: ME, rules: { github: rules }, extras: { github: { api: sick, issues: { repos: [], everyMs: 0 } } }, log: (m) => logs.push(m) });
+  let now = T0; runner.now = () => now;
+  const asked = () => api.calls.filter((u) => /\/pulls\/\d+$/.test(u)).map((u) => Number(u.split('/').pop()));
+  let r = await runner.run('github');
+  assert.deepEqual(asked(), [1, 2, 3, 4, 5, 6], 'the pass went on past the one that failed');
+  assert.match(r.status, /sweep: asked about 5, 1 closed/);
+  assert.deepEqual(r.reconciled.resolved, ['o/r#3'], 'and what it learned was kept, and acted on');
+  const cur = store.cursor('github').sweep;
+  assert.deepEqual([cur['o/r#1'].unanswered, cur['o/r#1'].closed_at, cur['o/r#2'].closed_at], [true, null, null]);
+  assert.deepEqual(github.describeCursor(store.cursor('github')).sweep, { asked: 5, closed: 1, unreadable: 0 }, 'the one that was not answered is counted neither as asked nor as unreadable');
+  // Not asked again every poll…
+  now = new Date(now.getTime() + 60_000); api.calls.length = 0;
+  await runner.run('github');
+  assert.deepEqual(asked(), []);
+  // …but in a quarter of an hour, not in a day.
+  now = new Date(now.getTime() + SWEEP_UNANSWERED_MS); api.calls.length = 0;
+  await runner.run('github');
+  assert.deepEqual(asked(), [1]);
+  // A secondary rate limit: a 403 the remaining-calls header never showed.
+  now = new Date(now.getTime() + SWEEP_EVERY_MS); api.calls.length = 0;
+  const limited = Object.create(api);
+  limited.get = async (u, o) => { if (/\/pulls\/\d+$/.test(u)) { api.calls.push(u); throw Object.assign(new Error('GitHub 403 on GET x: You have exceeded a secondary rate limit.'), { status: 403 }); } return api.get(u, o); };
+  runner.extras.github.api = limited;
+  const before = JSON.stringify(store.cursor('github').sweep);
+  r = await runner.run('github');
+  assert.equal(r.ok, true);
+  assert.equal(asked().length, 1, 'one refusal ends the pass');
+  assert.equal(JSON.stringify(store.cursor('github').sweep), before, 'and nothing is remembered as unreadable for a day');
+  assert.ok(logs.some((m) => /github: sweep: rate limited \(403\); \d+ threads left for a later poll/.test(m)));
+  // An ordinary 403 is still an answer about the thread.
+  limited.get = async (u, o) => { if (/\/pulls\/\d+$/.test(u)) throw Object.assign(new Error('GitHub 403 on GET x: Resource not accessible by personal access token'), { status: 403 }); return api.get(u, o); };
+  now = new Date(now.getTime() + 60_000);
+  await runner.run('github');
+  assert.ok(Object.values(store.cursor('github').sweep).every((e) => e.error === 403));
   store.close();
 });

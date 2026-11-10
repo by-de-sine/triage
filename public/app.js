@@ -36,7 +36,7 @@ const PAGE = 200;
  *  open it. */
 const listView = () => { const p = new URLSearchParams(location.search); return p.get('view') === 'all' || p.has('group') || FILTERS.some((k) => (p.get(k) || '').trim()); };
 /** How many of this week's the brief shows; "and N more" raises it. */
-const BRIEF = 5;
+const BRIEF = 5, BRIEF_MAX = 50;
 let briefLimit = BRIEF;
 const group = () => { try { return new URLSearchParams(location.search).get('group') || localStorage.getItem('triage.group') || ''; } catch { return ''; } };
 /** The narrowing in force, read from the URL every time so the back button
@@ -183,9 +183,14 @@ function drawBrief(b) {
   if (!b.needs.length) ol.append(el('li', 'empty', c.needs ? 'nothing new this week' : 'nothing needs you'));
   if (b.more) {
     const li = el('li', 'empty');
-    const more = el('button', 'more', `and ${b.more} more from this week — show them`); more.type = 'button';
-    more.onclick = () => { briefLimit = Math.min(50, briefLimit + 10); load(); };
-    li.append(more); ol.append(li);
+    // A door until the brief is as long as the server will make it; past
+    // that, the number, and the list is where the rest are.
+    if (briefLimit < BRIEF_MAX) {
+      const more = el('button', 'more', `and ${b.more} more from this week — show them`); more.type = 'button';
+      more.onclick = () => { briefLimit = Math.min(BRIEF_MAX, briefLimit + 10); load(); };
+      li.append(more);
+    } else li.textContent = `and ${b.more} more from this week — the list has them`;
+    ol.append(li);
   }
   sec.append(h, ol);
   if (b.aging.length) {

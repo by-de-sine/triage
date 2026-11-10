@@ -166,7 +166,11 @@ log(`slack: interrupts on ${Object.entries(deliver.interruptMap).map(([k, v]) =>
 if (cfg.slack.mode === 'webhook' && cfg.slack.notify !== 'off') log(`notify: interrupts ${cfg.slack.mention ? `mention ${cfg.slack.mention} — so the channel notifies, not just delivers` : 'mention nobody (TRIAGE_MENTION unset or off): a channel message is an unread badge, not a push'}`);
 // Plan §17.3: the brief — the one message a day that says what an interrupt
 // said once and what never interrupts at all.
-log(`brief: ${cfg.slack.briefAt == null ? 'off (TRIAGE_BRIEF=off) — the page has it' : `daily at ${String(Math.floor(cfg.slack.briefAt / 60)).padStart(2, '0')}:${String(cfg.slack.briefAt % 60).padStart(2, '0')} ${cfg.slack.tz}, on a day there is something to say${cfg.slack.pageUrl ? `, linking to ${cfg.slack.pageUrl}` : ' (TRIAGE_URL unset: no link back to the page)'}`}`);
+{
+  const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const at = deliver.describeBrief().at;
+  log(`brief: ${cfg.slack.briefAt == null ? 'off (TRIAGE_BRIEF=off) — the page has it' : `daily at ${at} ${cfg.slack.tz}${at === hhmm(cfg.slack.briefAt) ? '' : ` (TRIAGE_BRIEF=${hhmm(cfg.slack.briefAt)} is inside the quiet window, so it goes when the window ends)`}, on a day there is something to say${cfg.slack.pageUrl ? `, linking to ${cfg.slack.pageUrl}` : ' (TRIAGE_URL unset: no link back to the page)'}`}`);
+}
 
 // What Done does outside triage, per source: a map keyed by source name,
 // never a branch in act(). A source that declares `mark` supplies its own

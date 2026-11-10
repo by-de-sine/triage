@@ -8,7 +8,7 @@ import { Store } from '../lib/store.js';
 import { Ranker, rerank } from '../lib/rank.js';
 import { buildBrief, laneOf, crossed, label, unread, MARKS, FRESH_DAYS } from '../lib/brief.js';
 import { slackBrief, discordBrief, genericBrief, headline } from '../deliver/brief.js';
-import { SlackDelivery, BRIEF_CURSOR, localDay } from '../deliver/slack.js';
+import { SlackDelivery, BRIEF_CURSOR, localDay, briefMinute, parseQuiet } from '../deliver/slack.js';
 import { createApp } from '../lib/api.js';
 
 const ME = 'alice';
@@ -247,6 +247,29 @@ test('the brief goes once a local day, at its hour or after, never in the quiet 
   store.close();
 });
 
+test('an hour inside the quiet window is the minute the window ends — it would otherwise never come', async () => {
+  // 23:30 against 23:00-07:00: too early before it, quiet after it, and too
+  // early again in the morning. Found in review, before any box ran it.
+  const { store, d, posts, clock } = hook({ briefAt: 23 * 60 + 30 });
+  clock.set('2026-11-11T07:45:00Z');   // 23:45 on the 10th there
+  assert.equal(await d.brief(), null);
+  clock.set('2026-11-11T14:59:00Z');   // 06:59 on the 11th
+  assert.equal(await d.brief(), null);
+  clock.set('2026-11-11T15:00:00Z');   // 07:00: the window ends
+  assert.equal((await d.brief()).sent, true);
+  clock.set('2026-11-11T20:00:00Z');
+  assert.equal(await d.brief(), null, 'once that day');
+  clock.set('2026-11-12T15:00:00Z');
+  assert.equal((await d.brief()).sent, true, 'and at seven the next');
+  assert.equal(posts.length, 2);
+  assert.equal(d.describe().brief.at, '07:00', '/healthz says when it really goes');
+  const q = parseQuiet('23:00-07:00');
+  assert.deepEqual([briefMinute(480, q), briefMinute(1410, q), briefMinute(30, q), briefMinute(420, q), briefMinute(1379, q)], [480, 420, 420, 420, 1379]);
+  assert.equal(briefMinute(750, parseQuiet('12:00-13:00')), 780, 'a window that does not wrap');
+  assert.deepEqual([briefMinute(480, null), briefMinute(null, q)], [480, null]);
+  store.close();
+});
+
 test('a day with nothing to say sends nothing, and is not asked again that day', async () => {
   const store = new Store();
   for (let n = 0; n < 4; n++) seed(store, `bot${n}`, { tier: 'P3', rule: 'bot_only', claim: 0.05 });
@@ -338,6 +361,20 @@ test('GET /api/brief is the same read; a folded rule is a filter the lists take;
   assert.deepEqual(l.body.filter, { rule: 'bot_only' });
   assert.equal(l.body.groups[0].items.length + l.body.groups[0].more, 4);
   assert.ok(l.body.groups[0].items.every((i) => i.matches[0] === 'bot_only'));
+  // An item the ranker has not reached is folded by its latest verdict's
+  // rule — and the filter finds it by the same, or the count would open on
+  // fewer rows than it counted.
+  const { item } = store.upsertItem({ user: ME, source: 'forge', key: 'unranked', kind: 'pull', title: 'never ranked', last_activity: new Date(NOW.getTime() - 86_400_000).toISOString() });
+  store.setTier(item.id, 'P3', 1);
+  store.addDecision({ item_id: item.id, rule: 'ambient', tier: 'P3', reason: 'an older verdict', event_ids: [], matches: [] }, NOW.toISOString());
+  store.addDecision({ item_id: item.id, rule: 'bot_only', tier: 'P3', reason: 'the latest verdict', event_ids: [], matches: [] }, NOW.toISOString());
+  const counted = (await call(app, 'GET', '/api/brief')).body.folded.find((g) => g.rule === 'bot_only').n;
+  const listed = (await call(app, 'GET', '/api/lists?rule=bot_only')).body.groups[0];
+  assert.equal(counted, 5);
+  assert.equal(listed.items.length + listed.more, counted);
+  assert.ok(listed.items.some((i) => i.key === 'unranked'));
+  assert.equal((await call(app, 'GET', '/api/lists?rule=ambient')).body.groups[0].items.length, 0, 'the latest verdict, not any verdict');
+  assert.equal((await call(app, 'GET', '/api/lists?rule=bot_only&group=repo')).code, 200, 'grouped, the same clause');
   const s = await call(app, 'POST', '/api/brief/send');
   assert.equal(s.code, 200); assert.equal(s.body.sent, true);
   assert.equal(posts.length, 1);
