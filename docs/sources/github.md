@@ -22,6 +22,35 @@ only the issues it read, so a pull request from the inbox is never resolved
 for being absent from it. Which repositories is a list rather than an
 inference, because "repos I work in" is not a question GitHub answers.
 
+### The sweep
+
+The inbox says what *others* did. It never says that you merged your own
+pull request, and it goes quiet about a thread the moment the thread does
+— so an item the inbox opened would stay open here long after GitHub
+closed it. So on every poll the source asks GitHub about a few of its own
+unfinished threads: ten at most, the one asked longest ago first, one call
+each — `GET /repos/:repo/pulls/:n` for a pull request, `…/issues/:n` for
+an issue, so a per-owner token needs only the permission the inbox already
+needed for that thread.
+
+| GitHub says | Here |
+|---|---|
+| still open | remembered, and asked again in six hours |
+| closed or merged, and that is the last thing that happened | the item gets the `state` event the inbox would have brought, and the rules re-tier it: your own pull request becomes "your pull was merged" (P2); a thread you were only in becomes ambient. A stale "someone is waiting" leaves the top of the list at once |
+| closed for a day, with nothing since that needs you | **resolved by the source** — `resolved`, `by = source:github`, "merged on GitHub, and nothing since that needs you" — and never asked about again. New activity reopens it like any done item |
+| closed, but somebody has spoken on it since and it is P0 or P1 | left where it is: a reply after a close is a person waiting. "Since" is more than five minutes after — an approval and the merge that follows it are one act, and the notification of a close is stamped a moment after it |
+| cannot be read (gone, moved, a token this box does not hold) | left alone, asked again in a day. Not knowing is not closed |
+| no answer at all (a 5xx, a dropped connection) | asked again in a quarter of an hour; the pass goes on to the next thread, and ends after two in a row |
+| a rate limit (429, or a secondary limit's 403) | the pass ends, nothing is remembered, and the next poll asks again |
+| the inbox re-reads the thread | whatever the sweep was told is forgotten and it is asked about afresh — a thread reopened on GitHub is not resolved on an old answer |
+
+Issues the open set governs are the open set's and are never swept. The
+sweep stands down when the token's hourly rate is nearly spent, and a
+failure in it never costs the poll. A first pass over a few hundred stale
+threads takes under an hour; after that it costs one call per still-open
+thread every six hours. `GET /api/sources` shows how many it has asked
+about.
+
 An issue is one item however it arrives: both halves key it `owner/repo#n`
 and write the same fields, and the inbox keeps the thread id only it knows,
 so Done still marks the thread read.

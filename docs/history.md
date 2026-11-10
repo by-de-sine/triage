@@ -28,6 +28,7 @@ over.
 | 2026-10-15 | **G3 · the demo** — `TRIAGE_DEMO=1`, every fake at once (#4) | §16.3 |
 | 2026-10-15 | **G4 · ICS** — the calendar as a feed, `lib/ics.js` (#5) | §16.3 |
 | 2026-10-21 | **Seen** — a seventh action that changes no state: the tick from a surface that presents an item without owning it, counted where the reports read actions | §13.5 |
+| 2026-11-09 | **The brief** — the page opens on the few that need you, the rest as counts, and the same is one message a day; GitHub threads closed at the far end are swept and resolved by the source; a forge that is not answering at boot is registered and asked again. Prompted by nine weeks of one queue: 685 open, two actions taken, nine of the ten top threads already closed, and the inbox unread for three days after a reboot | §17 |
 
 Still intended: **M6 · learn it** (revealed preference from actions,
 saturation, hysteresis tuning), **G5 · the Slack app surface** (when the

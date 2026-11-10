@@ -44,8 +44,8 @@ With no source configured at all, the process says so and exits.
 
 `TRIAGE_SLACK`, `TRIAGE_WEBHOOK_URL`, `TRIAGE_NOTIFY`, `TRIAGE_MENTION`,
 `TRIAGE_QUIET`, `TRIAGE_COALESCE_MIN`, `TRIAGE_DELIVER_MAX_AGE_H`,
-`TRIAGE_INTERRUPT`, `TRIAGE_PREFS` and the Slack app's tokens — see
-[interrupts](interrupts.md#configuration).
+`TRIAGE_BRIEF`, `TRIAGE_URL`, `TRIAGE_INTERRUPT`, `TRIAGE_PREFS` and the
+Slack app's tokens — see [interrupts](interrupts.md#configuration).
 
 ## Ranking
 

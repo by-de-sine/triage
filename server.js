@@ -43,7 +43,10 @@ const store = new Store(cfg.db);
 // because a reply on GitLab is the same observation as a reply on GitHub.
 // `fake` is the canned forge from test/, which answers who you are (alice)
 // and says which repositories its open set covers.
-const sources = [], extras = {}, rules = {}, identity = {};
+// `resolve` holds the question for a forge that could not say who you are
+// at boot because it was not answering (plan §17.1): the runner asks again
+// before every poll, and reads nothing from that forge until it is answered.
+const sources = [], extras = {}, rules = {}, identity = {}, resolve = {};
 async function forge(name, source, c, Api, tokenOf, apiOpts = {}, demoApi) {
   const NAME = name.toUpperCase();
   if (c.mode === 'off') { log(`${name}: off (TRIAGE_${NAME}=off)`); return null; }
@@ -61,25 +64,38 @@ async function forge(name, source, c, Api, tokenOf, apiOpts = {}, demoApi) {
 }
 async function register(name, source, c, api, note = '') {
   const NAME = name.toUpperCase();
-  let me;
+  let me = null;
   try { me = await source.whoami({ api, user: c.user }); }
   catch (e) {
-    // A forge that is merely available — not insisted on — must not stop
-    // the box: a stale `glab` token for the wrong instance, or an outage
-    // at boot, is that forge off until the next restart, said out loud.
-    log(`${name}: off — cannot resolve who you are at ${api.base} (${e.message}); set ${NAME}_USER${c.mode === 'on' ? '' : `, or TRIAGE_${NAME}=off`}`);
-    if (c.mode === 'on') process.exit(1);
-    return null;
+    // An outage at boot — no answer at all, or a 5xx — is not a reason to
+    // run without this forge until somebody restarts the box: on
+    // 2026-11-06 a reboot raced the network, the one question failed once,
+    // and the inbox went unread for three days with nothing on any surface
+    // saying so. When the store already says whose queue this is, the
+    // forge registers anyway and the runner asks again before every poll.
+    // An answer that is a refusal (a 4xx: a stale token, the wrong
+    // instance) will not get better by asking, and an empty store has
+    // nobody to file items under — those are still that forge off, said
+    // out loud.
+    const transient = !e.status || e.status >= 500;
+    if (transient && c.mode !== 'fake' && store.firstUser()) {
+      resolve[name] = () => source.whoami({ api, user: c.user });
+      log(`${name}: ${api.base} is not answering (${e.message}) — registered without knowing who you are there; asked again before every poll, and nothing is read until it answers`);
+    } else {
+      log(`${name}: off — cannot resolve who you are at ${api.base} (${e.message}); set ${NAME}_USER${c.mode === 'on' ? '' : `, or TRIAGE_${NAME}=off`}`);
+      if (c.mode === 'on') process.exit(1);
+      return null;
+    }
   }
   const watched = c.issues.repos || c.issues.projects || [];
   sources.push(source);
   extras[name] = { api, all: c.all, issues: c.issues };
-  identity[name] = me;
+  if (me) identity[name] = me;
   rules[name] = threadRules;
   // Issues as state (plan §12.3 item 2): the inbox carries none, so the open
   // set of each listed repository is read whole and reconciled. Which ones
   // is yours to say, as config (§12.7); unset, the source is the inbox alone.
-  log(`${name}: ${api.base} as ${me}${note}${watched.length ? `; open issues as state from ${watched.join(', ')} every ${Math.round(c.issues.everyMs / 60_000)} min` : '; issues as state off — no repository named'}`);
+  if (me) log(`${name}: ${api.base} as ${me}${note}${watched.length ? `; open issues as state from ${watched.join(', ')} every ${Math.round(c.issues.everyMs / 60_000)} min` : '; issues as state off — no repository named'}`);
   return api;
 }
 await forge('github', github, cfg.github, GitHubApi, githubToken, { tokensDir: cfg.github.tokensDir }, async () => (await import('./test/fake-github.js')).demoGithub());
@@ -142,12 +158,19 @@ const rank = new Ranker({ ...cfg.rank, shapes: Object.fromEntries(sources.filter
 // Plan §14.3: what a project is, per source — the same map-built-at-boot
 // the ranker's `shapes` is, so nothing in deliver/ knows a repository from
 // a calendar and a source that declares none is not a special case.
-const deliver = new SlackDelivery(store, { ...cfg.slack, user, rank, log, projects: Object.fromEntries(sources.filter((s) => s.project).map((s) => [s.name, s.project])) });
+const deliver = new SlackDelivery(store, { ...cfg.slack, user, rank, log, sources: sources.map((s) => s.name), projects: Object.fromEntries(sources.filter((s) => s.project).map((s) => [s.name, s.project])) });
 log(`rank: claim ${cfg.rank.weights.claim} · time ${cfg.rank.weights.time} (${Object.keys(rank.shapes).join(', ') || 'none'}) · prefer ${cfg.rank.weights.prefer}${cfg.rank.prefer.length ? ` (${cfg.rank.prefer.length} stated)` : ' — nothing stated (TRIAGE_RANK_PREFER)'}`);
 log(`slack: interrupts on ${Object.entries(deliver.interruptMap).map(([k, v]) => `${k}: ${v.join(', ') || 'nothing'}`).join(' · ') || 'nothing (TRIAGE_INTERRUPT=off)'}${cfg.prefsFile ? ` · ${cfg.slack.interrupts.statements.length} statements over ${Object.keys(cfg.prefs.projects).length} projects (${cfg.prefsFile})` : ''}`);
 // Plan §14.1: a webhook's channel message notifies nobody unless it names
 // somebody, and the first real P0 this system sent proved it the hard way.
 if (cfg.slack.mode === 'webhook' && cfg.slack.notify !== 'off') log(`notify: interrupts ${cfg.slack.mention ? `mention ${cfg.slack.mention} — so the channel notifies, not just delivers` : 'mention nobody (TRIAGE_MENTION unset or off): a channel message is an unread badge, not a push'}`);
+// Plan §17.3: the brief — the one message a day that says what an interrupt
+// said once and what never interrupts at all.
+{
+  const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const at = deliver.describeBrief().at;
+  log(`brief: ${cfg.slack.briefAt == null ? 'off (TRIAGE_BRIEF=off) — the page has it' : `daily at ${at} ${cfg.slack.tz}${at === hhmm(cfg.slack.briefAt) ? '' : ` (TRIAGE_BRIEF=${hhmm(cfg.slack.briefAt)} is inside the quiet window, so it goes when the window ends)`}, on a day there is something to say${cfg.slack.pageUrl ? `, linking to ${cfg.slack.pageUrl}` : ' (TRIAGE_URL unset: no link back to the page)'}`}`);
+}
 
 // What Done does outside triage, per source: a map keyed by source name,
 // never a branch in act(). A source that declares `mark` supplies its own
@@ -173,7 +196,7 @@ if (cfg.rank.backfill) {
   if (!b.ranked) log(`rank: nothing to backfill (${store.countUnranked(user)} unranked)`);
 }
 const runner = new Runner(store, sources, {
-  user, identity,
+  user, identity, resolve,
   rules,
   deliver, rank,
   extras: { ...extras, calendar: cal?.feed

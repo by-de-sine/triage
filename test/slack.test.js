@@ -135,7 +135,7 @@ test('a held P0, once flushed, coalesces on the DM channel Slack answered with',
 // ---- M1: reflect ------------------------------------------------------------
 import { createActor } from '../lib/actions.js';
 
-test('the timer is the flush and nothing else — no batch, no digest (plan §11.3, 2026-09-12)', async () => {
+test('with no brief hour the timer is the flush and nothing else — no batch, no digest (plan §11.3, 2026-09-12; the brief is test/brief.test.js)', async () => {
   const { d, client, store } = setup();
   const { item } = store.upsertItem({ user: 'alice', source: 'github', key: 'o/r#10', kind: 'pull', title: 'PR', url: 'u', repo: 'o/r', last_activity: '2026-09-08T11:30:00Z' });
   store.setTier(item.id, 'P1', 1);

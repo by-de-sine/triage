@@ -34,11 +34,16 @@
 //   the Home tab   republished whenever the lists change (debounced), and
 //        every fifteen minutes so the time terms of the rank show, rather
 //        than drawn only when it is opened.
+//   the brief   (plan §17.3) one message a day, on a day there is
+//        something to say: the few items that need you by name, the rest
+//        as counts (lib/brief.js, deliver/brief.js). An interrupt is said
+//        once, and most of what is yours never interrupts; this is where
+//        those are said.
 //   everything else   is placed in the list and never sent. The P1 batch
-//        and the P2 digest are gone (plan §11.3; decided 2026-09-12):
-//        once the list is the surface, the list is the channel, and a
-//        message restating the middle of it is noise. The seat that reads
-//        triage is where a digest belongs.
+//        and the P2 digest are gone (plan §11.3; decided 2026-09-12): a
+//        message restating the middle of the list is noise. The brief is
+//        not that — it names at most eight items and counts the rest —
+//        and exists because the list, by itself, was not read (§17).
 //
 // The knobs from plan §3, config not code:
 //   coalesce  never two P0 DMs for one item inside the window; the existing
@@ -83,6 +88,19 @@ import { registerHandlers, itemMessage } from './handlers.js';
 import { webhookClient, webhookHost, MODES as NOTIFY_MODES } from './notify.js';
 import { SHAPES } from './messages.js';
 import { INTERRUPTS, interrupts as mayInterrupt, allows as mayInterruptWhy } from './interrupts.js';
+import { BRIEF_SHAPES, slackBrief, headline } from './brief.js';
+import { discordAllowedMentions } from './messages.js';
+import { buildBrief } from '../lib/brief.js';
+
+/** Where the brief's own state is kept: the day it last went out, and a
+ *  short history of which items each one named — the record a later
+ *  question ("how many briefs, and what happened to what they named?")
+ *  is answered from. A cursor like a source's, under a name no source has. */
+export const BRIEF_CURSOR = 'deliver:brief';
+const BRIEF_HISTORY = 90;
+const BRIEF_TRIES = 3;
+/** The local calendar day of an instant in a zone, as YYYY-MM-DD. */
+export const localDay = (d, tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 
 export function parseQuiet(s) {
   const m = /^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$/.exec(s || '');
@@ -99,11 +117,17 @@ function localMinutes(d, tz) {
   const h = +parts.find((p) => p.type === 'hour').value % 24, mi = +parts.find((p) => p.type === 'minute').value;
   return h * 60 + mi;
 }
+/** Whether a minute of the local day is inside the quiet window. */
+const quietAt = (quiet, m) => !!quiet && (quiet.start < quiet.end ? m >= quiet.start && m < quiet.end : m >= quiet.start || m < quiet.end);
 export function inQuiet(quiet, d, tz) {
   if (!quiet) return false;
-  const m = localMinutes(d, tz);
-  return quiet.start < quiet.end ? m >= quiet.start && m < quiet.end : m >= quiet.start || m < quiet.end;
+  return quietAt(quiet, localMinutes(d, tz));
 }
+/** The minute of the local day the brief really goes at: its hour, or —
+ *  when that hour is inside the quiet window — the minute the window ends.
+ *  Without this an hour like 23:30 against 23:00-07:00 never came: too
+ *  early before it, quiet after it, and too early again in the morning. */
+export const briefMinute = (briefAt, quiet) => (briefAt != null && quietAt(quiet, briefAt) ? quiet.end : briefAt);
 
 const fmt = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 const hours = (ms) => Math.round(ms / 3_600_000);
@@ -113,7 +137,7 @@ const hours = (ms) => Math.round(ms / 3_600_000);
 const where = (channel, ts) => (ts ? `${channel} ${ts}` : channel);
 
 export class SlackDelivery {
-  constructor(store, { mode = null, notify = null, webhookUrl = null, botToken, appToken, userId, user = null, quiet = '23:00-07:00', tz = Intl.DateTimeFormat().resolvedOptions().timeZone, coalesceMs = 600_000, maxAgeMs = 86_400_000, interrupts = INTERRUPTS, projects = {}, mention = null, rank = null, client = null, homeDelayMs = 2_000, homeEveryMs = 900_000, now = () => new Date(), log = () => {} } = {}) {
+  constructor(store, { mode = null, notify = null, webhookUrl = null, botToken, appToken, userId, user = null, quiet = '23:00-07:00', tz = Intl.DateTimeFormat().resolvedOptions().timeZone, coalesceMs = 600_000, maxAgeMs = 86_400_000, interrupts = INTERRUPTS, projects = {}, mention = null, rank = null, briefAt = null, pageUrl = null, sources = null, client = null, homeDelayMs = 2_000, homeEveryMs = 900_000, now = () => new Date(), log = () => {} } = {}) {
     this.store = store;
     // Which shape the webhook posts (deliver/messages.js). `slack` unless
     // told otherwise, which is what every webhook before G2 was; `off` is
@@ -148,6 +172,14 @@ export class SlackDelivery {
     // M5: the ranker, for the lists `/triage` and the Home tab draw. Optional
     // — without it they fall back to the stored order rather than failing.
     this.rank = rank;
+    // Plan §17.3: the brief. `briefAt` is minutes past local midnight, or
+    // null for never — which is what a caller that does not name it gets,
+    // so nothing that predates the brief starts sending one. `sources` is
+    // the registered sources' names, for the line that says one has
+    // stopped reading; `pageUrl` is the one link back to the page.
+    this.briefAt = Number.isFinite(briefAt) ? briefAt : null;
+    this.pageUrl = pageUrl || null;
+    this.sources = sources;
     this.client = client;
     this.now = now;
     this.log = log;
@@ -227,7 +259,7 @@ export class SlackDelivery {
   describe() {
     return { enabled: this.enabled, mode: this.mode, socket_mode: !!this.app, user: this.userId, channel: this.enabled ? this.channelName : null,
       mention: this.webhook ? this.mention : null, notify: this.webhook ? this.notify : null, projects: Object.keys(this.projects),
-      interrupts: this.interruptMap, webhook: this.webhook ? webhookHost(this.webhookUrl || '') : null, quiet: this.quiet ? `${fmt(this.quiet.start)}-${fmt(this.quiet.end)} ${this.tz}` : null, coalesce_ms: this.coalesceMs, max_age_ms: this.maxAgeMs, held: this.store.heldDeliveries().length };
+      interrupts: this.interruptMap, webhook: this.webhook ? webhookHost(this.webhookUrl || '') : null, brief: this.describeBrief(), quiet: this.quiet ? `${fmt(this.quiet.start)}-${fmt(this.quiet.end)} ${this.tz}` : null, coalesce_ms: this.coalesceMs, max_age_ms: this.maxAgeMs, held: this.store.heldDeliveries().length };
   }
 
   /** Connect. Socket Mode needs the app token; without it the bot token
@@ -497,8 +529,68 @@ export class SlackDelivery {
 
   /** Once a minute: what the quiet window or a coalesce window held, once
    *  it ends. That is the whole of the timer now. */
+  /** What /healthz says about the brief: when it goes, and how the last
+   *  one went. */
+  describeBrief() {
+    const last = this.store.cursor(BRIEF_CURSOR)?.history?.at(-1) || null;
+    return { at: this.briefAt == null ? null : fmt(briefMinute(this.briefAt, this.quiet)), last: last ? { day: last.day, at: last.at, sent: last.sent, note: last.note, items: last.items.length } : null };
+  }
+
+  /** The brief as it stands, built the one way every surface builds it. */
+  briefNow(now = this.now()) { return buildBrief(this.store, { user: this.user, rank: this.rank, now, sources: this.sources }); }
+
+  /** The brief as the message this path would post. */
+  briefMessage(b) {
+    if (!this.webhook) return slackBrief(b, { tz: this.tz, pageUrl: this.pageUrl });   // a DM notifies on its own
+    const shape = BRIEF_SHAPES[this.notify] || slackBrief;
+    return shape(b, { mention: this.mention, tz: this.tz, pageUrl: this.pageUrl, allowed: discordAllowedMentions(this.mention) });
+  }
+
+  /** The day's brief: once per local day, at or after `briefAt`, outside
+   *  the quiet window — so a box that was down at eight sends it when it
+   *  comes back, and one that comes back at midnight waits for morning. An
+   *  hour that is itself inside the quiet window means the minute the
+   *  window ends (`briefMinute`).
+   *  **A day with nothing to say sends nothing**, and is still the day's
+   *  brief: the cursor says it was quiet, so it is not asked again every
+   *  minute. A post that fails is tried on the next ticks, three times in
+   *  all, then left — the page has it, and tomorrow's will say it again.
+   *  `force` posts now whatever the day or the hour says (the API). */
+  async brief({ force = false } = {}) {
+    if (this.briefAt == null && !force) return null;
+    if (!this.enabled || !this.client) return force ? { sent: false, note: 'not sent: delivery is not configured' } : null;
+    const now = this.now();
+    const day = localDay(now, this.tz);
+    const state = this.store.cursor(BRIEF_CURSOR) || { day: null, tries: 0, history: [] };
+    if (!force) {
+      if (inQuiet(this.quiet, now, this.tz) || localMinutes(now, this.tz) < briefMinute(this.briefAt, this.quiet)) return null;
+      if (state.day === day && (state.done || state.tries >= BRIEF_TRIES)) return null;
+    }
+    const b = this.briefNow(now);
+    const items = [...b.needs, ...b.aging].map((i) => i.id);
+    let sent = false, note;
+    if (b.quiet && !force) note = 'nothing to say: no item to name and every source reading';
+    else {
+      try {
+        const msg = this.briefMessage(b);
+        if (this.webhook) await this.client.post(msg);
+        else await this.client.chat.postMessage({ channel: this.channelName, ...msg, unfurl_links: false });
+        sent = true; note = `sent ${this.channelName}: ${headline(b)}`;
+      } catch (e) { note = `not sent: ${e.data?.error || e.message}`; }
+    }
+    const tries = (state.day === day ? state.tries || 0 : 0) + 1;
+    const done = sent || b.quiet;
+    const entry = { day, at: now.toISOString(), sent, note, items };
+    // One entry per day: a retry replaces the failed attempt it follows.
+    const history = [...(state.history || []).filter((h) => h.day !== day || force), ...(done || tries >= BRIEF_TRIES || force ? [entry] : [])].slice(-BRIEF_HISTORY);
+    this.store.setCursor(BRIEF_CURSOR, { day, done: done || (state.day === day && state.done), tries, history }, now.toISOString());
+    this.log(`brief: ${note}`);
+    return { sent, note, items, quiet: b.quiet };
+  }
+
   async tick() {
     const flushed = await this.flush();
+    await this.brief().catch((e) => this.log(`brief: ${e.message}`));
     // The rank has a time term, so the order moves with nothing happening;
     // a Home tab left alone for a quarter of an hour is redrawn.
     let home = false;

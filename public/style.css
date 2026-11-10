@@ -299,3 +299,33 @@ main { max-width: 1100px; margin: 0 auto; padding: 22px 28px 40px; display: grid
   .stats .theme { justify-self: end; }
   .report h2 .inline { margin-left: 0; }
 }
+
+/* The brief (plan §17): the few that need you as rows, the rest as counts
+   that open. Its rule is the copper of a thing that is yours. */
+.group.brief h2 { border-color: var(--copper); }
+.brief h3.lane { font: 600 14px var(--display); margin: 22px 4px 0; display: flex; gap: 10px; align-items: baseline; }
+.brief h3.lane .muted { font: 400 12.5px var(--text); }
+.brief details.lane { margin-top: 14px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.brief details.lane summary { cursor: pointer; font: 500 13.5px var(--text); color: var(--ink-2); padding: 2px 4px; list-style-position: inside; }
+.brief details.lane summary b { color: var(--ink); font-weight: 600; }
+.brief details.lane summary:hover { color: var(--teal-2); }
+.brief details.lane[open] summary { color: var(--ink); }
+.brief .folds { margin: 14px 4px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 12.5px; }
+.brief .fold { font: 500 12px var(--mono); padding: 2px 9px; border-radius: 999px; border: 1px solid var(--rule-2); color: var(--ink-2); background: var(--surface); }
+.brief .fold b { color: var(--ink); font-weight: 600; }
+.brief button.fold:hover { border-color: var(--teal); color: var(--teal-2); }
+.brief .all { color: var(--teal-2); font: 500 12.5px var(--text); }
+.brief .all:hover { text-decoration: underline; }
+.brief .stopped { margin: 12px 4px 0; padding: 8px 12px; border-radius: var(--r-s); background: var(--crimson-soft); color: var(--crimson); font-size: 13px; }
+.brief .mark { font: 500 11.5px var(--mono); color: var(--copper-2); background: var(--copper-ghost); border: 1px solid var(--copper-soft); border-radius: 999px; padding: 0 7px; margin-right: 6px; }
+.row.fresh .title a, .row.fresh .title .plain { font-weight: 600; }
+/* A handful of rows can afford their whole title and a line of their own
+   for the actions: a choice with three answers must not squeeze the
+   sentence that says what is being chosen. */
+.brief .row { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+.brief .row .word { margin-top: 2px; }
+.brief .row .acts { grid-column: 2; justify-content: flex-start; }
+.brief .title > a, .brief .title .plain { white-space: normal; overflow: visible; }
+/* The list's own controls are the list's: the brief keeps the find box,
+   which is a way into the list, and nothing else. */
+body[data-view="brief"] .controls label, body[data-view="brief"] .controls select, body[data-view="brief"] .controls #ranked { display: none; }

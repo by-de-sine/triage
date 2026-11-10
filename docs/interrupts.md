@@ -3,6 +3,8 @@
 Every verdict is placed in the list. A few also **interrupt**: they are
 sent as a message — to Slack, Discord or any webhook — within a minute of
 landing. Which ones is a short named list of rules per source, not a tier.
+What does not interrupt is said, a few at a time, in [the brief](#the-brief)
+— one message a day.
 
 ## The default set
 
@@ -27,6 +29,48 @@ so>); it is in the list`.
 | **Age** | an event older than `TRIAGE_DELIVER_MAX_AGE_H` (24) is tiered but not sent, so a first boot does not replay your inbox into Slack |
 | **Acting first** | a held message is dropped if you act on the item before it goes out |
 | **Snooze** | a snooze that wakes as a P0 is always sent — you asked to be interrupted then. One that wakes as anything else goes back in the list |
+
+## The brief
+
+An interrupt is said once. If that minute was a bad one, nothing says it
+again — and most of what is yours to do never interrupts at all: a decision
+an agent is waiting on, a task past its date. The brief is where those are
+said: **one message a day**, through the same delivery, at `TRIAGE_BRIEF`
+(08:00 in `TRIAGE_TZ`).
+
+```text
+@you Triage · Tue 10 Nov — 4 need you this week · 1 slipping · 12 still waiting · 31 yours, undated
+
+Needs you
+• Turn the calendar feed on in production? — a choice: A) the secret address · B) another feed · C) leave it off (human-decision · 1 d)
+• Retry uploads on 502 — carol asked for your review (acme/widgets · today · new)
+Slipping
+• ⏳ 14 d waiting — Queue booking confirmations — adam commented after you did (acme/site · 14 d)
+
+Still waiting on you: 12 — the oldest 67 d, Two untracked paths
+Yours, no date: 31 — the oldest 69 d
+Folded away: 224 bot only · 90 task open · 75 ambient
+⚠️ github has not been read since 6 Nov 14:28 — fetch failed
+Open the brief
+```
+
+It is [the brief the page opens on](using.md#the-brief): at most five from
+this week and three that crossed a line today by name — the highest-ranked,
+when more did — and everything else as a count.
+
+| | |
+|---|---|
+| **Once a local day** | at the hour or after, so a box that was down at eight sends it when it is back |
+| **Never in the quiet window** | one that comes back at midnight waits for morning. A `TRIAGE_BRIEF` that is itself inside the quiet window means the minute the window ends: `23:30` against `23:00-07:00` is a brief at 07:00, and the boot log and `/healthz` say so |
+| **Nothing to say, nothing sent** | a day with no item to name and every source reading sends no message. A count of what is still waiting is yesterday's count |
+| **It names you** | on a webhook the configured `TRIAGE_MENTION` leads it, as on an interrupt; under the app it is a DM |
+| **A failed post** | is tried on the next two ticks, then left: tomorrow's says it again |
+| **Now** | `POST /api/brief/send` sends it whatever the hour |
+
+`TRIAGE_BRIEF=off` turns the message off; the page still opens on the
+brief. Set `TRIAGE_URL` to where the page is published and the message
+ends with a link to it. `/healthz` says when the brief goes and how the
+last one went (`slack.brief`).
 
 ## Where it goes
 
@@ -170,6 +214,8 @@ curl -s 'localhost:3300/api/interrupts?source=github&rule=new_issue&project=acme
 | `TRIAGE_TZ` | the system zone | for the quiet window and the reports |
 | `TRIAGE_COALESCE_MIN` | `10` | the coalesce window |
 | `TRIAGE_DELIVER_MAX_AGE_H` | `24` | the age guard |
+| `TRIAGE_BRIEF` | `08:00` | when [the brief](#the-brief) goes out, as `HH:MM` in `TRIAGE_TZ`, or `off`. Anything else is refused at boot. An hour inside `TRIAGE_QUIET` goes when the window ends |
+| `TRIAGE_URL` | — | where the page is published, for the link the brief ends with. A link, never fetched |
 | `TRIAGE_INTERRUPT` | — | layer 3: statements, comma-separated. `off` interrupts on nothing; a source named with no rules interrupts on none |
 | `TRIAGE_PREFS` | `preferences.json` beside the `.env` | layers 1 and 2 |
 | `SLACK_BOT_TOKEN` · `SLACK_APP_TOKEN` · `SLACK_USER_ID` | — | the app path only. Without the bot token and user id nothing is sent; without the app token, DMs go out but no button, `/triage` or Home tab answers |

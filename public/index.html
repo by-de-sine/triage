@@ -18,16 +18,18 @@
   <h1 class="brand">
     <a class="wordmark" href="/" title="triage">triage</a>
   </h1>
-  <nav class="nav" aria-label="pages"><a href="/" aria-current="page">list</a><a href="/stats">stats</a></nav>
+  <nav class="nav" aria-label="pages"><a href="/" id="nav-brief" aria-current="page">brief</a><a href="/?view=all" id="nav-list">list</a><a href="/stats">stats</a></nav>
   <div class="glance" id="glance" aria-label="at a glance"></div>
   <div class="pulse" id="pulse"><span class="dot" id="dot"></span><span id="observed">loading…</span></div>
   <button class="theme" id="theme" title="theme (t)" aria-label="toggle theme">◐</button>
 </header>
 
 <main id="main">
-  <!-- M5: one ordered list. The groups are built by the script now, because
-       what they are depends on `?group=` — ungrouped it is the queue, then
-       snoozed and later. -->
+  <!-- Two views of one store (plan §17). The brief is what `/` opens on:
+       the few that need you, the rest as counts. The list — `?view=all`, or
+       any narrowing — is everything, in rank order: M5's one ordered list,
+       its groups built by the script because what they are depends on
+       `?group=`. -->
   <div class="controls">
     <label for="group">group</label>
     <select id="group">
@@ -48,7 +50,7 @@
 </main>
 
 <footer class="foot">
-  <span>one list, in rank order — the page shows everything, and acting happens here. <a href="/api/rank">rank</a> · <a href="/api/decisions?limit=50">decisions</a> · <a href="/api/sources">sources</a> · <a href="/healthz">healthz</a></span>
+  <span>the brief is the few that need you; <a href="/?view=all">the list</a> is everything, in rank order — acting happens here. <a href="/api/brief">brief</a> · <a href="/api/rank">rank</a> · <a href="/api/decisions?limit=50">decisions</a> · <a href="/api/sources">sources</a> · <a href="/healthz">healthz</a></span>
   <span class="keys"><kbd>j</kbd><kbd>k</kbd> move · <kbd>d</kbd> done · <kbd>s</kbd><kbd>S</kbd> snooze 1h/1d · <kbd>l</kbd> later · <kbd>m</kbd> mute · <kbd>↵</kbd> the solid action · <kbd>/</kbd> find · <kbd>esc</kbd> clear · <kbd>r</kbd> refresh · <kbd>t</kbd> theme · <kbd>g</kbd> group</span>
 </footer>
 <script src="/app.js" type="module"></script>

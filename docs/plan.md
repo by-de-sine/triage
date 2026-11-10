@@ -1783,3 +1783,124 @@ owner's box was a one-commit rewrite of this tree (2026-09-20, no remote),
 read as the design source for the four ports and never merged from. It is
 archived beside triage's own backups, and this paragraph is the record of
 what it was.
+
+## 17. The brief: what the list assumed, and what two months said
+
+*Written and built 2026-11-09, from the owner's own account of using it:
+"I find the reports overwhelming, so I don't read them, but I'm still
+dropping tasks that I wish I'd wrapped up earlier … the emphasis on human
+sorting is causing too much spam. Instead of hitting me with everything we
+should be presenting the user with choice items and aggregations." What
+shipped is in [using](using.md#the-brief), [interrupts](interrupts.md#the-brief)
+and [GitHub](sources/github.md#the-sweep); this section is why.*
+
+§11 made the list the product and retired every second channel (§11.3: "the
+list is the channel"). That holds only if the list is read, and the store
+says how it was read. On 2026-11-09, nine weeks in:
+
+| | |
+|---|---|
+| items open | 685 of 843 ever stored |
+| actions taken by the owner | **2** — both Done, both in the first week |
+| items closed by anything | 165, every one by a source (`resolved`) |
+| interrupts sent | 61, one a week by November |
+| the ten open forge threads ranked P0/P1 | **nine were closed on GitHub** |
+| a sample of 25 "open" pull requests | 25 closed or merged on GitHub |
+| the GitHub source | off since a reboot three days earlier; on no surface |
+
+Three assumptions failed, and each has its own answer here.
+
+### 17.1 A source that fails at boot is not a source that is off
+
+`server.js` asked a forge who you are once, at boot, and dropped it for the
+life of the process when that failed. On 2026-11-06 a reboot raced the
+network; the question failed once; the box ran for three days with no
+inbox, and `/healthz` only named it because a run row from the previous
+process was still in the store.
+
+*Built:* an outage at boot (no answer, or a 5xx) registers the forge
+anyway when the store already says whose queue it is. The runner holds the
+question (`resolve`, a map built at boot like the others) and asks before
+every poll; nothing is read from that source until it answers, because a
+rule handed the wrong `me` reads your own replies as somebody waiting.
+Meanwhile every run is recorded as failed, so the source is failing in
+plain sight. A refusal (4xx) and an empty store are still "off", said out
+loud, as before.
+
+### 17.2 A feed never hears the end of a thread
+
+§12.2 gave state-shaped sources `reconcile`: what has left the set is
+resolved by the source. The inbox was left out of it as a feed — things
+that *happened*. But an item the feed opens is unfinished until something
+says otherwise, and the feed never does: GitHub does not notify you of
+your own merge, and it is silent about a thread once the thread is. So a
+feed's items only ever closed by the owner pressing Done, which is the
+sorting §17 is about.
+
+*Built:* the seam is widened for every source, not for GitHub — `poll`'s
+context carries `unfinished()`, the source's own open, snoozed and later
+items, and `reconcile` may return `reason(item)`. GitHub uses them for a
+third half, the **sweep**: a budget of ten of its unfinished inbox threads
+a poll, the longest-unasked first, one call each. A thread found closed
+gets the `state` event the inbox would have brought — when the close is
+the last thing that happened on it — and the rules re-tier it as they
+would have; closed a day with nothing since that needs you, it leaves the
+set `reconcile` answers with and is resolved by the source. A thread
+somebody spoke on after it closed stays: that is a person waiting. A thread
+that cannot be read is left alone: not knowing is not closed.
+
+Nothing here is an opinion in the store (§13.5). The event is a fact the
+far end reported; the resolution is attributed to the source, as an issue
+closed in the open set always was.
+
+*Not built:* the same for GitLab. Its todos are closer to state already,
+and its turn waits for a queue that shows the need.
+
+### 17.3 An interrupt is said once, and most of what is yours is never said
+
+The interrupt set is for a person waiting on you, within a minute. If that
+minute was a bad one, nothing says it again. And a decision an agent is
+waiting on, a task past its date, an undated thing that is simply yours —
+none of them interrupts, by design. With the digest retired, those were
+only ever on a page.
+
+*Built:* **the brief** (`lib/brief.js`) — the same store, read without
+asking the reader to sort it first. Which lane an item is in is read off
+what the rules and the source already said: the tier's meaning (P0 someone
+is waiting, P1 yours and moving) and the time curve the source picked
+(`fading` is news whatever its tier; a `spike` that has passed is a meeting
+that happened).
+
+- **needs you** — those from this week, in rank order, five at a time;
+- **slipping** — an older one, on the day it crosses 7, 14, 30, 60 or 90
+  days, and not again until the next line. Read from the clock alone, so
+  nothing has to remember what was said;
+- **still waiting** and **yours, no date** — a count and its oldest;
+- **folded away** — everything else, as counts by the rule that put it
+  there;
+- **not being read** — a source failing for half an hour or more.
+
+It is the page's opening view (the list is one press away and is the
+whole of it, as before), `GET /api/brief`, and **one message a day** — at
+`TRIAGE_BRIEF` (08:00), through whatever delivery is configured, on a day
+there is something to say. A day with nothing to name sends nothing.
+
+This reverses §11.3's "no second channel", on the evidence above, and
+keeps what that decision was protecting: the brief restates nothing from
+the middle of the list. It names at most eight items and counts the rest.
+
+### 17.4 What this does not do, and what would show it worked
+
+- **No model, still.** The brief is counts and the rules' own sentences.
+  Whether a model should write a better sentence is the seat's question
+  (§13.5) and the seat can read `/api/brief` instead of the whole queue.
+- **No bulk action.** A folded count opens the list narrowed to that rule
+  (`?rule=`); "Done all 224" is not offered. With the brief as the opening
+  view the pile costs nothing, and a bulk Done on a forge is 224 writes to
+  the far end.
+- **`/triage` and the Home tab** still draw the list. They follow when the
+  app exists in production.
+- **The measure.** `deliver:brief` in the store keeps ninety days of which
+  items each brief named. Against `actions` that answers the question §15
+  could not: of what was said, what did the owner act on, and how long
+  after. Before: 2 actions in nine weeks, 0 on anything delivered.
