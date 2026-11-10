@@ -18,11 +18,27 @@
 // the inbox is not "gone" for being absent from a set it was never in —
 // and the ingestion mode is recorded on the item for that reason.
 //
+// **And a third half, since plan §17.2: the sweep.** The inbox is a feed of
+// what *others* did. It never says that you merged your own pull request,
+// and it stops speaking about a thread the moment the thread stops moving —
+// so an item the inbox opened stays open here long after GitHub closed it.
+// In the first two months that was nine of every ten open threads, and
+// nine of the ten ranked highest. So a few of the source's own unfinished
+// threads are asked about on every poll, oldest answer first: one call
+// each. A thread found closed gets the `state` event the inbox would have
+// brought (the same key, so the two never double it), and the rules re-tier
+// it like any other event; one that has been closed a day with nothing
+// since that needs you leaves the set `reconcile` reports, and is resolved
+// there — attributed to the source, like an issue closed in the open set.
+//
 // Cursor: { last_modified, threads: { [thread id]: { updated_at, seen, key } },
-//           issues: { read_at, repos, open: [key], complete, error } }.
+//           issues: { read_at, repos, open: [key], complete, error },
+//           sweep: { [key]: { at, closed_at } | { at, error } } }.
 // A thread whose updated_at has not moved costs nothing; one that has costs
 // one subject call and, for issues and PRs, up to three list calls. The
 // open set costs one list call per repository per page, once per cadence.
+// The sweep costs at most SWEEP_PER_POLL calls a poll, and once it has
+// been round, one call per still-open thread per SWEEP_EVERY_MS.
 import { isBot, nextLink, sameLogin } from '../lib/util.js';
 import { threadTime, sameRepos } from '../lib/forge.js';
 
@@ -31,6 +47,18 @@ const ROLE_BY_REASON = { author: 'authored', mention: 'mentioned', team_mention:
 const CURSOR_TTL_MS = 30 * 86_400_000;
 const MAX_PAGES = 20; // 1,000 threads; a safety cap, not a design limit
 const ISSUE_PAGES = 10; // 1,000 open issues per repository; the same kind of cap
+/** The sweep's budget and cadence. Ten a poll is a first pass over a few
+ *  hundred stale threads within the hour and well under a tenth of the
+ *  token's hourly rate; six hours between looks at a thread that is still
+ *  open is slow on purpose — a close that matters arrives through the inbox,
+ *  and this is the net under it. A thread that could not be read is left
+ *  for a day. */
+export const SWEEP_PER_POLL = 10;
+export const SWEEP_EVERY_MS = 6 * 3_600_000;
+export const SWEEP_RETRY_MS = 24 * 3_600_000;
+/** How long a closed thread stays in the list: a day, which is what "worth
+ *  knowing today" (P2) means for the news that it closed. */
+export const SETTLE_AFTER_MS = 24 * 3_600_000;
 const lower = (s) => String(s || '').toLowerCase();
 
 export function itemKey(n) {
@@ -75,7 +103,8 @@ export default {
   project: (item) => item.repo || null,
 
   /** Who the items belong to on GitHub: `GITHUB_USER`, else `GET /user`,
-   *  resolved once at boot (server.js) and handed to every rule as `me`. */
+   *  resolved once — at boot (server.js), or by the runner before a poll
+   *  when GitHub was not answering then — and handed to every rule as `me`. */
   async whoami({ api, user = null }) { return user || (await api.get('/user')).body.login; },
 
   /** What Done does on GitHub: the thread is marked read, so the two
@@ -108,28 +137,60 @@ export default {
     // for it, and it would sit open with a closed state on it.
     const governed = new Set(st ? [...(prev.issues?.open || []), ...(st.cursor.open || [])] : []);
     const fd = await inbox({ ...ctx, prev, governed, now, log });
+    // The third half: what the inbox opened and never heard the end of.
+    // After the inbox, so a thread it has just re-read is asked about with
+    // what it brought. Its own try — the sweep is a net, and a hole in a
+    // net must not cost the poll that carries the interrupts.
+    let sw = null;
+    try { sw = await sweep({ ...ctx, prev, moved: new Set(fd.batches.map((b) => b.item.key)), now, log }); }
+    catch (e) { log(`sweep: ${e.message}`); }
     // The issues half of the cursor survives a 304 on the inbox, and is
     // dropped when the mode is off — a set nobody reads must not be
-    // reconciled against later.
-    const next = { ...fd.cursor, ...(st ? { issues: st.cursor } : {}) };
-    return { batches: [...(st?.batches || []), ...fd.batches], cursor: next, every: fd.every, status: st ? `${fd.status}; ${st.status}` : fd.status };
+    // reconciled against later. The sweep's survives a failed pass.
+    const sweepCursor = sw ? sw.cursor : prev.sweep;
+    const next = { ...fd.cursor, ...(st ? { issues: st.cursor } : {}), ...(sweepCursor ? { sweep: sweepCursor } : {}) };
+    return { batches: [...(st?.batches || []), ...fd.batches, ...(sw?.batches || [])], cursor: next, every: fd.every, status: [fd.status, st?.status, sw?.status].filter(Boolean).join('; ') };
   },
 
   /** The current open set, for the runner to resolve against (plan §12.2),
    *  and which items it speaks for. From the cursor, not the network: the
    *  set is exactly what the last read ingested. `null` when the mode is
    *  off or nothing has been read yet — there is nothing to say. */
-  reconcile({ cursor, issues = null }) {
+  reconcile({ cursor, issues = null, now = new Date() }) {
     const repos = issues?.repos || [];
     const st = cursor?.issues;
-    if (!repos.length || !st) return null;
+    const sw = cursor?.sweep || null;
+    const state = repos.length && st ? { complete: !!st.complete && sameRepos(st.repos, repos), same: sameRepos(st.repos, repos) } : null;
+    const swept = sw && Object.keys(sw).length ? sw : null;
+    if (!state && !swept) return null;
     const watched = new Set(repos.map(lower));
-    const same = sameRepos(st.repos, repos);
+    const inOpenSet = (item) => item.kind === 'issue' && item.data?.mode === 'open' && watched.has(lower(item.repo));
+    const error = state && !state.complete ? (state.same ? st.error || null : 'the repository list changed since the last read') : null;
+    // The open set alone, as it always was — and whenever it could not be
+    // read whole, sweep or no sweep: an incomplete read resolves nothing
+    // and says why, and what the sweep found waits for the next whole one.
+    if (!swept || (state && !state.complete)) return { keys: st.open || [], complete: state.complete, error, governs: inOpenSet };
+    // With the sweep, two authorities share one answer, each over its own
+    // items. The open set speaks for the issues its mode ingested; the
+    // sweep speaks for a thread it has asked about and found finished —
+    // closed for a day, with nothing since the close that needs you. A
+    // thread still open, one inside the day, and one somebody has spoken
+    // on after it closed are not governed at all, which is how reconcile
+    // is told "leave it".
+    const t = now.getTime();
+    const settled = (item) => {
+      const e = swept[item.key];
+      if (!e?.closed_at || inOpenSet(item)) return false;
+      if (t - Date.parse(e.closed_at) < SETTLE_AFTER_MS) return false;
+      const since = Date.parse(item.last_activity) > Date.parse(e.closed_at);   // parsed: the two ends do not spell an instant alike
+      return !(since && (item.tier === 'P0' || item.tier === 'P1'));
+    };
     return {
-      keys: st.open || [],
-      complete: !!st.complete && same,
-      error: same ? st.error || null : 'the repository list changed since the last read',
-      governs: (item) => item.kind === 'issue' && item.data?.mode === 'open' && watched.has(lower(item.repo)),
+      keys: state ? st.open || [] : [],
+      complete: true,
+      error: null,
+      governs: (item) => (state ? inOpenSet(item) : false) || settled(item),
+      reason: (item) => (settled(item) ? `${item.data?.state === 'merged' ? 'merged' : 'closed'} on GitHub, and nothing since that needs you` : null),
     };
   },
 
@@ -139,6 +200,10 @@ export default {
     if (!state || typeof state !== 'object') return state;
     const out = { last_modified: state.last_modified || null, threads: Object.keys(state.threads || {}).length };
     if (state.issues) out.issues = { repos: (state.issues.repos || []).length, open: (state.issues.open || []).length, complete: !!state.issues.complete, read_at: state.issues.read_at || null };
+    if (state.sweep) {
+      const es = Object.values(state.sweep);
+      out.sweep = { asked: es.length, closed: es.filter((e) => e.closed_at).length, unreadable: es.filter((e) => e.error).length };
+    }
     return out;
   },
 };
@@ -184,6 +249,82 @@ async function inbox({ api, prev, me, now, log, all = false, governed = new Set(
   for (const [id, t] of Object.entries(threads)) if (now - Date.parse(t.seen || 0) > CURSOR_TTL_MS) delete threads[id];
   const lm = res.headers.get('last-modified');
   return { batches, cursor: { last_modified: complete ? (lm || prev.last_modified) : prev.last_modified, threads }, every, status: `${list.length} unread, ${fetched} read, ${skipped} unchanged` };
+}
+
+/** The third half: ask the far end about the source's own unfinished
+ *  threads, a few a poll, the one asked longest ago first. `unfinished` is
+ *  the runner's — the items of this source that are open, snoozed or later.
+ *
+ *  What it asks about: issues and pull requests the inbox wrote. An issue
+ *  the open set governs already has an authority, and anything else (a
+ *  release, a commit) has no open or closed to ask after.
+ *
+ *  What it does with the answer: remembers it in the cursor, and for a
+ *  thread found closed, hands back the item with its state corrected and —
+ *  when the close is the last thing that happened on it — the `state`
+ *  event the inbox would have carried, keyed exactly as the inbox keys it,
+ *  so whichever half saw the close first, it is one event.
+ *  The rules then say what the close means (your pull merged; nothing
+ *  addressed to you), which is what takes a stale "someone is waiting" off
+ *  the top of the list at once. Resolving is `reconcile`'s, a day later.
+ *
+ *  A thread it cannot read — gone, moved, or behind a token this box does
+ *  not hold — is remembered as unreadable and left alone: not knowing is
+ *  not the same as closed. */
+async function sweep({ api, prev, unfinished = null, moved = new Set(), now, log }) {
+  if (typeof unfinished !== 'function') return null;
+  const items = unfinished().filter((i) => (i.kind === 'pull' || i.kind === 'issue') && i.data?.mode !== 'open' && /^[^#@]+\/[^#@]+#\d+$/.test(i.key));
+  const was = prev.sweep || {};
+  const t = now.getTime(), nowIso = now.toISOString();
+  // Only what is still unfinished is remembered: an item the sweep settled,
+  // or you finished, leaves the cursor with it. If new activity reopens it,
+  // it is asked about afresh.
+  const next = {};
+  for (const i of items) if (was[i.key]) next[i.key] = was[i.key];
+  const dueAt = (i) => { const e = next[i.key]; return !e ? 0 : Date.parse(e.at) + (e.error ? SWEEP_RETRY_MS : SWEEP_EVERY_MS); };
+  // A thread found closed is never asked about again: closed is the end of
+  // what the sweep is for, and a reopening arrives through the inbox.
+  const due = items.filter((i) => !next[i.key]?.closed_at && !moved.has(i.key) && dueAt(i) <= t).sort((a, b) => dueAt(a) - dueAt(b) || (Date.parse(a.last_activity) || 0) - (Date.parse(b.last_activity) || 0));
+  const batches = [];
+  let asked = 0, closed = 0;
+  for (const i of due.slice(0, SWEEP_PER_POLL)) {
+    if (api.rate.remaining != null && api.rate.remaining < 50) { log(`sweep: rate limit low (${api.rate.remaining}); ${due.length - asked} threads left for a later poll`); break; }
+    const [repo, num] = i.key.split('#');
+    let s;
+    try { s = (await api.get(`/repos/${repo}/issues/${num}`)).body; }
+    catch (e) {
+      // A refusal is an answer about this thread; anything else is about
+      // the far end, and the next poll asks again.
+      if (!e.status) throw e;
+      next[i.key] = { at: nowIso, error: e.status };
+      asked++;
+      continue;
+    }
+    asked++;
+    const merged_at = s.pull_request?.merged_at || null;
+    const closed_at = s.state === 'closed' ? merged_at || s.closed_at || nowIso : null;
+    next[i.key] = { at: nowIso, closed_at };
+    if (!closed_at) continue;
+    closed++;
+    const state = merged_at ? 'merged' : 'closed';
+    const actor = s.closed_by?.login || null;
+    // The event is handed back only when the close is the last thing that
+    // happened. The rules judge what is fresh, and a close found late is
+    // fresh whenever it happened: one from before a reply would be read as
+    // the newest word on the thread and take "ann replied to you" down to
+    // "your pull was closed". When something has happened since, the item's
+    // verdict is already about that, and only its state is corrected.
+    const last = Date.parse(i.last_activity);
+    const latest = !Number.isFinite(last) || Date.parse(closed_at) >= last;
+    batches.push({
+      item: { key: i.key, kind: i.kind, title: s.title || i.title, url: i.url, repo: i.repo, actors: i.actors, my_role: i.my_role, last_activity: i.last_activity, last_seen: nowIso, data: { ...i.data, state } },
+      events: !latest ? [] : [merged_at
+        ? { key: `github:merged:${i.key}`, ts: merged_at, kind: 'state', actor, body: 'merged', url: s.html_url || i.url, data: { state: 'merged' } }
+        : { key: `github:closed:${i.key}:${closed_at}`, ts: closed_at, kind: 'state', actor, body: 'closed', url: s.html_url || i.url, data: { state: 'closed' } }],
+    });
+  }
+  const left = due.length - Math.min(due.length, SWEEP_PER_POLL);
+  return { batches, cursor: next, status: asked || left ? `sweep: asked about ${asked}, ${closed} closed${left ? `, ${left} still to ask` : ''}` : null };
 }
 
 /** The state half: the open issues of every watched repository, whole, once

@@ -26,12 +26,12 @@ npm run demo      # every source on its fake at http://127.0.0.1:3300
 server.js        boot: config, store, the sources that resolve, delivery, the runner, the API
 sources/         one file per source — github, gitlab, calendar, ledger, ha, crm
 rules/           thread.js (both forges), calendar, ledger, ha, crm — ordered, named, each with a claim
-deliver/         slack.js (the guards and the answer on every decision), notify.js (the webhook client),
-                 messages.js (the slack / discord / generic shapes), blocks.js (the app's messages and views),
+deliver/         slack.js (the guards and the answer on every decision, and when the brief goes), notify.js (the webhook client),
+                 messages.js (the slack / discord / generic shapes), brief.js (the brief in each shape), blocks.js (the app's messages and views),
                  handlers.js (the app's buttons, /triage, Home), interrupts.js (what may interrupt, four layers)
-lib/             store, runner, pipeline, rules, actions (act), lists, rank, backfill, aggregates, reports,
+lib/             store, runner, pipeline, rules, actions (act), lists, brief, rank, backfill, aggregates, reports,
                  api, config, forge-api + forge (both forges), ics, google-api, ha-api, twenty-api, util
-public/          the list page and the stats page — static, no build
+public/          the page (the brief and the list) and the stats page — static, no build
 bin/replay.js    run the rules over one real thread, step by step, writing nothing
 bin/google-consent.js  the one browser step for the Google calendar path
 slack/           the Slack app manifest
@@ -60,7 +60,9 @@ for every source** rather than naming one. That is how every optional
 member of the source contract arrived — `due` and `describeCursor` for the
 calendar, `time` for ranking, `reconcile` and `governs` for state-shaped
 sources, `project` for interrupt preferences, `whoami` and `mark` for a
-second forge — each a map built at boot from the registered sources. The
+second forge, `unfinished()` and `reason` for a feed that has to ask
+whether what it reported is finished — each a map built at boot from the
+registered sources, or a member of the context every source is handed. The
 test a change has to pass: nothing in `lib/` outside an API client says the
 new thing's name.
 
@@ -199,6 +201,7 @@ forge and writing nothing. For the calendar, the equivalent is
 | a rule | `rules.test.js` (and `rank.test.js` if it changes what the rule is worth) |
 | the ranker | `rank.test.js` |
 | the list, the counts, a report | `lists.test.js`, `aggregates.test.js`, `reports.test.js` (a new report is an entry in `lib/reports.js` and a case here) |
+| the brief — which lane an item is in, what the message says, when it goes | `brief.test.js` |
 | what may interrupt — layers, statements, projects | `interrupts.test.js` |
 | reading config or the preferences file | `config.test.js` |
 | what a message says | `slack.test.js` or `handlers.test.js`, against `deliver/blocks.js` |
@@ -208,14 +211,15 @@ forge and writing nothing. For the calendar, the equivalent is
 | acting | `actions.test.js`, `api.test.js` |
 | the ICS parser and recurrence | `ics.test.js` |
 | either calendar reader, the alarm, reconcile | `calendar-source.test.js` |
-| the GitHub source | `github-source.test.js` |
+| the GitHub source — the inbox, the open set, the sweep | `github-source.test.js` |
 | the GitLab source | `gitlab-source.test.js` |
 | the forge clients, tokens, paging | `forge-api.test.js` |
 | the ledger | `ledger.test.js` (writes a real queue file to a temp dir) |
 | Home Assistant | `ha.test.js` (dates derived from `NOW` — a due date is a *local* day and CI may run in UTC) |
 | the CRM | `crm.test.js` |
 | what the demo boots | `demo.test.js` |
-| the runner — ingest, the clock, reconcile, snooze wakes | `pipeline.test.js` |
+| the runner — ingest, the clock, reconcile, snooze wakes, an identity resolved late | `pipeline.test.js` |
+| what `server.js` does at boot when a far end is not answering | `boot.test.js` (the process itself, against a port nothing listens on) |
 | the store | `store.test.js` |
 | the Slack SDKs themselves — a Dependabot bump | `slack-sdk.test.js`: the real packages over a fake Slack, skipped without `node_modules`, required in CI's `install` job |
 

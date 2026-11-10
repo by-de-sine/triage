@@ -223,3 +223,18 @@ test('a mention that Slack would not notify on is refused at boot', () => {
   assert.equal(parseMention('<@u9>'), '<@U9>');
   assert.equal(parseMention('!CHANNEL'), '<!channel>');
 });
+
+test('TRIAGE_BRIEF is a time of day or off — on at eight unless told otherwise, and a typo is refused; TRIAGE_URL is the page the brief links to', () => {
+  assert.equal(cfg().slack.briefAt, 8 * 60, 'unset: 08:00, after the default quiet window');
+  assert.equal(cfg({ TRIAGE_BRIEF: '7:30' }).slack.briefAt, 450);
+  assert.equal(cfg({ TRIAGE_BRIEF: '00:00' }).slack.briefAt, 0);
+  assert.equal(cfg({ TRIAGE_BRIEF: 'off' }).slack.briefAt, null);
+  assert.equal(cfg({ TRIAGE_BRIEF: 'OFF' }).slack.briefAt, null);
+  // The failure this prevents: `TRIAGE_BRIEF=of` reading as the default.
+  for (const bad of ['8', '8am', '24:00', '08:60', 'on', 'daily']) assert.throws(() => cfg({ TRIAGE_BRIEF: bad }), /TRIAGE_BRIEF must be a time of day as HH:MM, or off/, bad);
+  assert.equal(cfg().slack.pageUrl, null);
+  assert.equal(cfg({ TRIAGE_URL: 'https://triage.example.com/' }).slack.pageUrl, 'https://triage.example.com');
+  assert.equal(cfg({ TRIAGE_URL: 'http://localhost:3300' }).slack.pageUrl, 'http://localhost:3300', 'a link, never fetched: plain http is yours to choose');
+  assert.throws(() => cfg({ TRIAGE_URL: 'triage.example.com' }), /TRIAGE_URL is not a URL/);
+  assert.throws(() => cfg({ TRIAGE_URL: 'ftp://triage.example.com' }), /TRIAGE_URL must be http\(s\)/);
+});

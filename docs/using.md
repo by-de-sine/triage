@@ -1,10 +1,43 @@
 # Using the list
 
-The page (`/`), `GET /api/lists`, `/triage` and the Slack Home tab all show
-the same order, from `lib/lists.js`, so they cannot disagree about what is
-first.
+Two views of one store. The **brief** is what the page opens on: the few
+things that need you, and everything else as counts. The **list** is
+everything, in rank order — one press away, and where you search.
+
+## The brief
+
+![The brief: the few that need you as rows with their actions, the rest as counts that open](images/brief.png)
+
+`/`, and `GET /api/brief`. It is a read of the same items the list holds,
+and it asks nothing of you first — nothing has to be sorted before it gets
+shorter.
+
+| | |
+|---|---|
+| **needs you** | what needs you and began to this week, in rank order, five at a time (`and N more` shows the rest). Each row is the list's own row: the same sentence, the same buttons, and a choice's answers as buttons |
+| **slipping** | an older one, on the day it has waited 7, 14, 30, 60 or 90 days — said once as it crosses the line, then not until the next |
+| **still waiting on you** | every other item that needs you: a count and its oldest. Opens into its rows |
+| **yours, no date** | what is yours with no clock on it: a count and its oldest. Opens into its rows |
+| **folded away** | everything else — news, bots, other people's — as counts by the rule that put it there. A count is the list narrowed to that rule |
+| **not being read** | a source that has been failing for half an hour or more, and since when |
+
+**What "needs you" means** is read off what the rules already said, never
+judged again: an item whose [tier](ranking.md#tiers) is P0 or P1, unless
+its source says time has finished with it — news (a merged pull request, a
+note somebody edited) goes stale rather than waits, and a meeting that has
+happened is over. *Yours, no date* is a P2 on something that waits.
+
+The same brief goes out as [one message a day](interrupts.md#the-brief),
+on a day there is something to say.
+
+The list is at `/?view=all` (the **list** link), and any narrowing or
+grouping opens it. The list, `GET /api/lists`, `/triage` and the Slack Home
+tab all show the same order, from `lib/lists.js`, so they cannot disagree
+about what is first.
 
 ## The list
+
+![The list: every open item in rank order, each with Open, Done, Snooze, Later and Mute](images/list.png)
 
 One ordered list of everything open — every tier, in [rank](ranking.md)
 order. **Snoozed** and **Later** are their own groups after it, because
@@ -20,8 +53,9 @@ without reordering it, each group in the rank order of its best item.
 `owner` is *what it takes* — a ledger row's owner kind, a thread's
 repository. The grouping is a preference, kept in `localStorage`.
 
-**Narrow** with `?tier=&repo=&source=&owner=&q=` (`q` is a word from the
-title, key or repository). Filters live in the URL, so a reload or a
+**Narrow** with `?tier=&repo=&source=&owner=&rule=&q=` (`rule` is the
+strongest rule that fired, which is what the brief folds by; `q` is a word
+from the title, key or repository). Filters live in the URL, so a reload or a
 pasted link asks the same question. Counts (`more`, "N open") are of what
 matches; counts by tier stay the whole queue's. On the page the tier tiles
 are those filters, and `/` focuses the find box.
@@ -53,8 +87,9 @@ says).
 
 The system's own moves are actions too: `wake` when a snooze ends,
 `reopen` when a done item draws new activity, and `resolved`
-(`by = source:<name>`) when a state-shaped source no longer holds the item.
-Only your own actions are feedback.
+(`by = source:<name>`) when its source says it is finished — a ledger row
+deleted, a task completed, an issue closed, a pull request
+[merged](sources/github.md#the-sweep). Only your own actions are feedback.
 
 ```bash
 curl -X POST localhost:3300/api/items/12/act -H 'content-type: application/json' -d '{"action":"snooze","until":"1h"}'

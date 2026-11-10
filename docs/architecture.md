@@ -7,10 +7,10 @@ sources/            rules/              deliver/                    act
   github   ─┐                                    ┌─ interrupt: one message per verdict that interrupts (Slack, Discord, any webhook)
   gitlab    ┤                                    │
   calendar  ┤                                    │
-  ledger    ┼─▶ items · events (sqlite) ─▶ tier ─┤
-  ha        ┤        ▲   ▲                       └─ the list: the page · /api/lists · /triage · Home tab (everything else)
+  ledger    ┼─▶ items · events (sqlite) ─▶ tier ─┼─ the brief: the page's opening view · /api/brief · one message a day (the few that need you, the rest counted)
+  ha        ┤        ▲   ▲                       └─ the list: the page · /api/lists · /triage · Home tab (everything)
   crm      ─┘        │   └─ the clock (a snooze ending, a meeting 15 min out, a CRM unread too long)
-                     │      and reconcile (a ledger row, chore, task or open issue that is gone)
+                     │      and reconcile (a ledger row, chore, task or open issue that is gone; a thread closed at its forge)
                      └── decisions (every verdict, delivered or not)
                      └── actions ◀── done · snooze · later · mute · open · answer ◀── buttons, page, POST /act
 ```
@@ -42,13 +42,13 @@ fact about what you did, not a judgement about what you should do.
 | Member | Required | What it is |
 |---|---|---|
 | `name`, `every`, `describe` | yes | identity, poll interval, one line for `/api/sources` |
-| `poll(ctx)` | yes | gets the cursor it returned last time; returns `{ batches: [{ item, events }], cursor, every?, status? }`. It owns its cursor and never writes — the runner stores what it returns |
+| `poll(ctx)` | yes | gets the cursor it returned last time; returns `{ batches: [{ item, events }], cursor, every?, status? }`. It owns its cursor and never writes — the runner stores what it returns. `ctx.unfinished()` is the source's own items that are still open, snoozed or later, read when called: for a feed that has to ask the far end whether what it once reported is finished ([GitHub's sweep](sources/github.md#the-sweep)) |
 | `due(ctx)` | | the clock's half: what became true because time passed, not because the far end changed (a meeting fifteen minutes out). Called **before** every poll in its own `try`, so an outage at the far end does not stop an alarm for something already in the store. Events are keyed by the moment they are about, so they fire once |
-| `reconcile(ctx)` | | the state half, for items that are *true and unfinished* rather than *happened*: returns the current set of keys and whether the read was `complete`. The runner resolves what has left the set and reopens what the source resolved that has come back. May also return `governs(item)` — which items the set speaks for — or `null` for "nothing to say" |
+| `reconcile(ctx)` | | the state half, for items that are *true and unfinished* rather than *happened*: returns the current set of keys and whether the read was `complete`. The runner resolves what has left the set and reopens what the source resolved that has come back. May also return `governs(item)` — which items the set speaks for — `reason(item)` — why one left, in the source's words — or `null` for "nothing to say" |
 | `describeCursor(state)` | | how the cursor is shown in `/api/sources` (never a secret) |
 | `time(item, { rules })` | | which time curve ranks this item (`waiting`, `fading`, `spike`, `flat`) — decided from the rules that fired |
 | `project(item)` | | which project the item belongs to, for [interrupt preferences](interrupts.md#making-it-yours) |
-| `whoami(ctx)` | | who you are on this source, resolved once at boot, so `me` in a rule is right per source |
+| `whoami(ctx)` | | who you are on this source, resolved once, so `me` in a rule is right per source. At boot — or, for a forge that was not answering then, before every poll until it answers: the source is registered and failing in plain sight meanwhile, and nothing is read from it until it knows who you are |
 | `mark(item, ctx)` | | what Done does at the far end. A source without one is read-only there |
 
 Every optional member is a map built at boot from the registered sources;
@@ -122,6 +122,13 @@ which one runs:
   for what nobody pressed — with later interrupts replied into its
   thread; `/triage`; a Home tab republished when the lists change.
 
+**The brief** (`lib/brief.js`, `deliver/brief.js`) is the other thing
+delivery sends: once a day, the few items that need you and the rest as
+counts — a read of the store like the lists, which lane an item is in
+taken from its tier and the time curve its source picked. It writes no
+verdict and changes no state; what it posted is kept under `deliver:brief`
+in `cursors`.
+
 See [interrupts](interrupts.md).
 
 ## Act
@@ -142,7 +149,7 @@ SQLite in WAL mode, at `TRIAGE_DB` (default
 | `decisions` | every verdict: rule, tier, reason, the whole `matches` set, `event_ids`, what delivery did, and `by` (`rule`, or `wake`) |
 | `actions` | everything done to an item, by whom |
 | `deliveries` | which message carries which item: `sent`, `held`, `dropped`; `message_ts` is Slack's id (null from a webhook, which returns none); `thread_ts` marks a follow-up replied into the item's DM |
-| `cursors`, `source_runs` | per-source cursor and read health |
+| `cursors`, `source_runs` | per-source cursor and read health; `cursors` also holds `deliver:brief`, the day the brief last went and ninety days of which items each one named |
 
 **The schema migrates itself at boot**, idempotently: `CREATE IF NOT
 EXISTS`, columns added when `PRAGMA table_info` says they are missing, and
