@@ -12,7 +12,7 @@ sources/            rules/              deliver/                    act
   crm      ─┘        │   └─ the clock (a snooze ending, a meeting 15 min out, a CRM unread too long)
                      │      and reconcile (a ledger row, chore, task or open issue that is gone; a thread closed at its forge)
                      └── decisions (every verdict, delivered or not)
-                     └── actions ◀── done · snooze · later · mute · open · answer ◀── buttons, page, POST /act
+                     └── actions ◀── done · snooze · later · mute · open · answer · seen ◀── buttons, page, POST /act
 ```
 
 **Source → item → rule → delivery**, with **act** as the one write path
