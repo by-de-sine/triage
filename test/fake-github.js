@@ -23,6 +23,7 @@ export function fakeApi(routes, { pollInterval = 60, lastModified = 'Mon, 01 Sep
       return { status: 200, headers: hdr, text: async () => JSON.stringify(routes['/notifications']) };
     }
     if (method === 'PATCH' && /^\/notifications\/threads\/[^/]+$/.test(u.pathname)) { routes.marked = (routes.marked || []).concat(u.pathname.split('/').pop()); return { status: 205, headers: hdr, text: async () => '' }; }
+    if (routes.links?.[url]) hdr.set('link', `<${routes.links[url]}>; rel="next"`);
     const hit = routes[path] ?? routes[u.pathname];
     if (hit === undefined) return { status: 404, headers: hdr, text: async () => JSON.stringify({ message: `no fixture for ${path}` }) };
     return { status: 200, headers: hdr, text: async () => JSON.stringify(typeof hit === 'function' ? hit(u) : hit) };
@@ -79,6 +80,7 @@ export function demoGithub({ now = () => new Date() } = {}) {
     [`/repos/${R}/issues/57`]: issue({ repo: R, number: 57, title: 'Login page flashes white on dark mode', author: 'carol', created_at: at(400), updated_at: at(35) }),
     [`/repos/${R}/issues/57/comments`]: [{ ...comment(9101, 'carol', at(35), '@alice this looks like the theme script runs after first paint — your area?', R, 57), html_url: `https://github.com/${R}/issues/57#issuecomment-9101` }],
     [`/repos/${R}/pulls/38`]: pull({ repo: R, number: 38, title: 'Retry uploads on 502', author: 'carol', created_at: at(500), requested_reviewers: ['alice'] }),
+    [`/repos/${R}/issues/38/events`]: [{ id: 8001, event: 'review_requested', created_at: at(70), actor: user('carol'), requested_reviewer: user('alice'), review_requester: user('carol') }],
     ...none(R, 38),
     [`/repos/${S}/pulls/12`]: pull({ repo: S, number: 12, title: 'Bump marketing copy', author: 'alice', created_at: at(900), state: 'closed', merged_at: at(180), closed_at: at(180) }),
     ...none(S, 12),

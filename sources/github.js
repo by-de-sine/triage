@@ -164,20 +164,22 @@ async function inbox({ api, prev, me, now, log, all = false, governed = new Set(
   }
   // A scan cut short by the cap must not advance Last-Modified, or the
   // threads it never reached would be skipped by the next 304.
-  const complete = !next;
+  let complete = !next;
   if (!complete) log(`inbox exceeds ${MAX_PAGES * 50} threads; read the first ${list.length}, Last-Modified not advanced`);
   const batches = [];
   let fetched = 0, skipped = 0;
   for (const n of list) {
     const known = threads[n.id];
     if (known && known.updated_at === n.updated_at) { skipped++; threads[n.id] = { ...known, seen: nowIso }; continue; }
-    if (api.rate.remaining != null && api.rate.remaining < 50) { log(`rate limit low (${api.rate.remaining}); leaving ${n.repository.full_name} for the next poll`); continue; }
+    if (api.rate.remaining != null && api.rate.remaining < 50) { complete = false; log(`rate limit low (${api.rate.remaining}); leaving ${n.repository.full_name} for the next poll`); continue; }
     try {
-      const b = await thread(api, n, known, me, governed);
+      const reviewRequestsSince = known && Object.hasOwn(known, 'review_requests_since') ? known.review_requests_since : known?.updated_at || null;
+      const b = await thread(api, n, known, me, governed, reviewRequestsSince);
       batches.push(b);
-      threads[n.id] = { updated_at: n.updated_at, seen: nowIso, key: b.item.key };
+      threads[n.id] = { updated_at: n.updated_at, seen: nowIso, key: b.item.key, review_requests_since: reviewRequestsSince };
       fetched++;
     } catch (e) {
+      complete = false;
       log(`${n.repository.full_name} ${n.subject.type} ${n.subject.title}: ${e.message}`);
     }
   }
@@ -263,7 +265,7 @@ function issueData(s, extra = {}) {
 
 /** One thread -> {item, events}. `known` is the cursor's memory of it;
  *  `governed` is the open set the state half speaks for. */
-async function thread(api, n, known, me, governed = new Set()) {
+async function thread(api, n, known, me, governed = new Set(), reviewRequestsSince = null) {
   const kind = KINDS[n.subject.type] || String(n.subject.type).toLowerCase();
   const key = itemKey(n);
   const since = known?.updated_at || null;
@@ -288,8 +290,16 @@ async function thread(api, n, known, me, governed = new Set()) {
   if (!since) events.push({ key: `github:opened:${item.repo}#${num}`, ts: s.created_at, kind: 'opened', actor: author, body: s.body || '', url: s.html_url, data: {} });
   if (s.merged_at && (!since || s.merged_at > since)) events.push({ key: `github:merged:${item.repo}#${num}`, ts: s.merged_at, kind: 'state', actor: s.merged_by?.login || null, body: 'merged', url: s.html_url, data: { state: 'merged' } });
   else if (s.closed_at && s.state === 'closed' && (!since || s.closed_at > since)) events.push({ key: `github:closed:${item.repo}#${num}:${s.closed_at}`, ts: s.closed_at, kind: 'state', actor: null, body: 'closed', url: s.html_url, data: { state: 'closed' } });
-  if (n.reason === 'review_requested' && (s.requested_reviewers || []).some((u) => sameLogin(u.login, me))) {
-    events.push({ key: `github:review_request:${item.repo}#${num}:${n.updated_at}`, ts: n.updated_at, kind: 'review_request', actor: author, body: null, url: s.html_url, data: { by_bot: isBot(author) } });
+  if (kind === 'pull' && (s.requested_reviewers || []).some((u) => sameLogin(u.login, me))) {
+    const requests = await api.listPages(`/repos/${item.repo}/issues/${num}/events`, { pages: MAX_PAGES });
+    if (!requests.whole) throw new Error('review request events incomplete; leaving the thread for the next poll');
+    for (const r of requests.list) {
+      if (r.event !== 'review_requested' || !sameLogin(r.requested_reviewer?.login, me)) continue;
+      if (reviewRequestsSince && r.created_at <= reviewRequestsSince) continue;
+      const requester = r.review_requester?.login || r.actor?.login || null;
+      actors.add(requester);
+      events.push({ key: `github:review_request:${r.id}`, ts: r.created_at, kind: 'review_request', actor: requester, body: null, url: s.html_url, data: { id: r.id, by_bot: isBot(requester) } });
+    }
   }
   const repoPath = `/repos/${item.repo}`;
   const comments = await api.list(`${repoPath}/issues/${num}/comments`, { params: { since } });
