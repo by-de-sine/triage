@@ -256,7 +256,7 @@ test('a failed read after a long stop retains the legacy review boundary for ret
   assert.equal(retry.batches[0].events.some(e => e.kind === 'review_request'), false);
 });
 
-test('request-event pagination is followed and an incomplete read is retried without advancing either checkpoint', async () => {
+test('request-event pagination is followed and a capped scan retains both checkpoints and continuation state', async () => {
   const rt = reviewRoutes([]);
   const firstUrl = 'https://api.github.com/repos/o/r/issues/5/events?per_page=100';
   const secondUrl = 'https://api.github.com/repos/o/r/issues/5/events?page=2';
@@ -267,12 +267,69 @@ test('request-event pagination is followed and an incomplete read is retried wit
   moveReview(rt, '2026-09-02T03:15:00Z');
   rt.links[secondUrl] = secondUrl;
   const failed = await github.poll({ api: fakeApi(rt), cursor: first.cursor, me: ME });
-  assert.equal(failed.batches.length, 0);
-  assert.deepEqual(failed.cursor.threads['5'], first.cursor.threads['5']);
+  assert.equal(failed.batches.length, 1);
+  assert.equal(failed.cursor.threads['5'].updated_at, first.cursor.threads['5'].updated_at);
+  assert.equal(failed.cursor.threads['5'].review_request_next, secondUrl);
   assert.equal(failed.cursor.last_modified, first.cursor.last_modified);
   delete rt.links[secondUrl];
   const retry = await github.poll({ api: fakeApi(rt), cursor: failed.cursor, me: ME });
   assert.equal(retry.batches.length, 1);
+  assert.equal(retry.cursor.threads['5'].review_request_next, undefined);
+});
+
+test('a long request scan ingests mentions, resumes after restart and continuation failures, and delivers the request once', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'triage-review-pages-'));
+  const file = path.join(dir, 'store.db');
+  let store = new Store(file);
+  t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const rt = reviewRoutes([]);
+  rt['/repos/o/r/issues/5/comments'] = [comment(900, 'carol', '2026-09-02T02:58:00Z', '@alice look at this', 'o/r', 5)];
+  rt.links = {};
+  let previous = 'https://api.github.com/repos/o/r/issues/5/events?per_page=100';
+  for (let page = 2; page <= 22; page++) {
+    const url = `https://api.github.com/repos/o/r/issues/5/events?page=${page}`;
+    rt.links[previous] = url;
+    rt[`/repos/o/r/issues/5/events?page=${page}`] = Array.from({ length: 100 }, () => ({ event: 'labeled' }));
+    previous = url;
+  }
+  rt['/repos/o/r/issues/5/events?page=22'] = [requestEvent(500, '2026-09-02T02:59:00Z')];
+  const hook = fakeWebhook();
+  let now = new Date('2026-09-02T03:00:00Z');
+  const boot = () => new Runner(store, [github], {
+    user: ME, rules: { github: rules }, extras: { github: { api: fakeApi(rt) } }, now: () => now,
+    deliver: new SlackDelivery(store, { mode: 'webhook', webhookUrl: hook.url, client: webhookClient(hook.url, { fetch: hook.fetch }), quiet: '', now: () => now }),
+  });
+  let runner = boot();
+  await runner.run('github');
+  assert.equal(hook.posts.length, 1);
+  assert.match(hook.posts[0].text, /carol mentioned you/);
+  const partial = store.cursor('github');
+  assert.equal(partial.threads['5'].updated_at, null);
+  assert.equal(partial.threads['5'].review_requests_since, null);
+  assert.match(partial.threads['5'].review_request_next, /page=21$/);
+  assert.equal(partial.last_modified, null);
+  store.close();
+  store = new Store(file);
+  runner = boot();
+  const page21 = rt['/repos/o/r/issues/5/events?page=21'];
+  rt['/repos/o/r/issues/5/events?page=21'] = () => { throw new Error('temporary continuation failure'); };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await runner.run('github');
+    assert.deepEqual(store.cursor('github'), partial);
+    assert.equal(hook.posts.length, 1);
+  }
+  rt['/repos/o/r/issues/5/events?page=21'] = page21;
+  now = new Date('2026-09-02T03:15:00Z');
+  moveReview(rt, now.toISOString());
+  await runner.run('github');
+  assert.equal(hook.posts.length, 2);
+  assert.match(hook.posts[1].text, /ann asked for your review/);
+  assert.equal(store.cursor('github').threads['5'].review_request_next, undefined);
+  assert.equal(store.cursor('github').threads['5'].updated_at, now.toISOString());
+  now = new Date('2026-09-02T03:30:00Z');
+  moveReview(rt, now.toISOString());
+  await runner.run('github');
+  assert.equal(hook.posts.length, 2);
 });
 
 test('legacy requests do not send again through delivery, while a later request still notifies', async (t) => {

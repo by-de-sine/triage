@@ -90,3 +90,30 @@ change preserves shared trigger selection. Correcting evidence selection
 would widen the rule/pipeline contract and is outside once-per-request
 deduplication. The source retains actual request timestamps; the documented
 age behavior is qualified by which event triggers delivery.
+
+## CodeRabbit round one
+
+Review 6015269540 identified two valid edge cases. Each is fixed in its
+own commit, then validated and pushed together:
+
+- Incomplete inbox reads must not evict expired thread boundaries. A
+  regression after a stop longer than thirty days reproduced the loss.
+- A capped request-event read must not block comments or reviews forever.
+  The source will persist a next-page URL and resume after twenty pages.
+  It can append request events already read because the store deduplicates
+  their IDs. While pages remain, it keeps the old thread timestamp and
+  inbox Last-Modified. Comments and reviews still flow on every poll.
+  On completion it clears continuation state and commits the timestamp.
+
+An independent plan review approved this source-owned continuation design.
+The former test that rejected all partial batches must change to assert
+partial ingestion and retained checkpoints, because blocking the whole
+thread on a page cap is the second reviewed defect.
+
+Round-one fixes passed independent implementation review. The source suite
+now has 26 passing tests. Full UTC and Vancouver suites each have 319
+passing tests, zero failures, and the same one optional SDK skip. The
+new long-history regression proved that direct mentions are delivered
+while scanning, a disk restart preserves continuation state, repeated
+continuation failures preserve progress, and the eventual request sends
+once despite later updates. Diff whitespace checks pass.

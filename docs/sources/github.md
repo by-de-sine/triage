@@ -19,8 +19,11 @@ and polling do not create another request. An explicit later re-request
 has its own ID and can notify again. Event IDs persist in the store, so
 restarts and a lost polling cursor do not replay requests already read.
 
-Request-event reads follow up to twenty pages. A failed or capped read
-preserves both the thread checkpoint and the inbox Last-Modified value
+Request-event reads follow up to twenty pages per poll, saving the next
+page to resume longer histories on later polls. Comments and reviews keep
+flowing while the request scan is incomplete. Request IDs already read
+can be ingested safely; the thread checkpoint and inbox Last-Modified
+advance only after the scan finishes. A failed read preserves progress
 for retry. The usual delivery age guard uses the request's actual time
 when it is the triggering event.
 
