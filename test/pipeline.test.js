@@ -124,3 +124,51 @@ test('a source with no due() is unchanged, and one whose due() throws still poll
   assert.match(logs.find((m) => m.includes('due')), /due — Error: clock broke/);
   s.close();
 });
+
+// Plan §17.1. On 2026-11-06 a reboot raced the network: the one question
+// "who are you on GitHub" failed once at boot, the forge was dropped for the
+// life of the process, and the inbox went unread for three days with no
+// surface saying so. A source registered without an identity asks again.
+test('a source that could not say who you are at boot is asked before every poll, reads nothing until it answers, and is a failing source meanwhile', async () => {
+  const { Runner } = await import('../lib/runner.js');
+  const s = new Store();
+  const logs = [];
+  let up = false, polls = 0, dues = 0, asked = 0;
+  const b = batch([ev('c1', 'comment', 'alice-on-the-forge', '2026-09-01T00:00:00Z'), ev('c2', 'comment', 'ann', '2026-09-01T01:00:00Z')]);
+  const src = { name: 'github', every: 60_000, due: () => { dues++; return null; }, poll: async ({ me }) => { polls++; assert.equal(me, 'alice-on-the-forge'); return { batches: [b], cursor: 1 }; } };
+  const identity = {};
+  const runner = new Runner(s, [src], { user: ME, identity, rules: { github: rules }, log: (m) => logs.push(m),
+    resolve: { github: async () => { asked++; if (!up) throw new Error('fetch failed'); return 'alice-on-the-forge'; } } });
+  let r = await runner.run('github');
+  assert.deepEqual([r.ok, r.error], [false, 'cannot resolve who you are: fetch failed']);
+  assert.deepEqual([polls, dues], [0, 0], 'neither half runs: a rule handed the wrong `me` reads your own reply as somebody waiting');
+  assert.deepEqual([s.runs().github.ok, s.runs().github.error], [false, 'cannot resolve who you are: fetch failed'], 'it is on /healthz and the brief, where a source dropped at boot was nowhere');
+  r = await runner.run('github');
+  assert.equal(r.ok, false);
+  assert.equal(asked, 2, 'asked again, every run');
+  up = true;
+  r = await runner.run('github');
+  assert.equal(r.ok, true);
+  assert.equal(identity.github, 'alice-on-the-forge', 'into the one map everything reads who you are from');
+  assert.equal(r.decisions[0].rule, 'reply_to_my_comment', 'the rules were handed who you are there, so ann\'s reply is a reply to you');
+  assert.ok(logs.some((m) => /github: you are alice-on-the-forge — resolved now, not at boot/.test(m)));
+  await runner.run('github');
+  assert.equal(asked, 3, 'answered once, never asked again');
+  assert.equal(polls, 2);
+  s.close();
+});
+
+test('a poll may ask for the source\'s own unfinished items: open, snoozed and later — never done, never another source\'s', async () => {
+  const { Runner } = await import('../lib/runner.js');
+  const s = new Store();
+  const put = (source, key, state) => { const { item } = s.upsertItem({ user: ME, source, key, kind: 'pull', title: key }); if (state !== 'open') s.setState(item.id, state, state === 'snoozed' ? '2099-01-01T00:00:00Z' : null); };
+  put('github', 'a', 'open'); put('github', 'b', 'snoozed'); put('github', 'c', 'later'); put('github', 'd', 'done'); put('github', 'e', 'muted'); put('gitlab', 'f', 'open');
+  let seen = null, read = 0;
+  const lazy = { name: 'gitlab', every: 60_000, poll: async (ctx) => { read += typeof ctx.unfinished === 'function' ? 0 : 1; return { batches: [] }; } };
+  const src = { name: 'github', every: 60_000, poll: async ({ unfinished }) => { seen = unfinished().map((i) => i.key); return { batches: [] }; } };
+  const runner = new Runner(s, [src, lazy], { user: ME, rules: {} });
+  await runner.run('github'); await runner.run('gitlab');
+  assert.deepEqual(seen, ['a', 'b', 'c']);
+  assert.equal(read, 0, 'every source is handed the function; one that never calls it reads nothing');
+  s.close();
+});

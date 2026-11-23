@@ -1,6 +1,12 @@
-// triage — the list page. Reads /api/lists and /healthz, draws the groups it
-// is given in the order they come, and posts to /api/items/:id/act for the
-// buttons. Read-mostly: it refreshes every minute and after an action.
+// triage — the page: the brief it opens on, and the list. Reads /api/brief
+// or /api/lists, and /healthz; draws the groups it is given in the order
+// they come, and posts to /api/items/:id/act for the buttons. Read-mostly:
+// it refreshes every minute and after an action.
+//
+// Plan §17: the brief is the few that need you and the rest as counts —
+// nothing to sort before it is short. The list is everything, at
+// `?view=all` or under any narrowing or grouping; all of the below about
+// groups and filters is the list's.
 //
 // M5: the server decides what the groups are, because `?group=` changes
 // them — one queue by default, several when the list is cut by repo, source,
@@ -21,8 +27,17 @@ const $ = (s, el = document) => el.querySelector(s);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const ACTS = [['done', 'done', 'Done'], ['snooze', '1h', 'Snooze 1h'], ['snooze', '1d', 'Snooze 1d'], ['later', null, 'Later'], ['mute', null, 'Mute']];
 const BLURB = { queue: 'everything open, in rank order', snoozed: 'back at their wake time', later: 'tossed to the end, no date' };
-const FILTERS = ['tier', 'repo', 'source', 'owner', 'q'];
+const FILTERS = ['tier', 'repo', 'source', 'owner', 'rule', 'q'];
 const PAGE = 200;
+/** Which view this is (plan §17). The brief unless the URL asks for the
+ *  list — by name (`view=all`), or by narrowing or grouping it, since a
+ *  question about the list is a question for the list. The grouping kept
+ *  in localStorage is a preference about the list and does not, by itself,
+ *  open it. */
+const listView = () => { const p = new URLSearchParams(location.search); return p.get('view') === 'all' || p.has('group') || FILTERS.some((k) => (p.get(k) || '').trim()); };
+/** How many of this week's the brief shows; "and N more" raises it. */
+const BRIEF = 5, BRIEF_MAX = 50;
+let briefLimit = BRIEF;
 const group = () => { try { return new URLSearchParams(location.search).get('group') || localStorage.getItem('triage.group') || ''; } catch { return ''; } };
 /** The narrowing in force, read from the URL every time so the back button
  *  and a pasted link both mean what they say. */
@@ -31,14 +46,16 @@ const narrow = () => { const p = new URLSearchParams(location.search); return Ob
  *  to the question starts the page again from the top. */
 function setNarrow(key, value) {
   const u = new URL(location.href);
-  if (value) u.searchParams.set(key, value); else u.searchParams.delete(key);
+  // Taking a narrowing off leaves you in the list you were narrowing,
+  // rather than dropping you back on the brief.
+  if (value) u.searchParams.set(key, value); else { u.searchParams.delete(key); u.searchParams.set('view', 'all'); }
   history.replaceState(null, '', u);
   ask();
 }
 /** A new question: back to the first page, and nothing has "moved" — the
  *  copper flash is for a row that slid up under the cursor after an act,
  *  not for a list that was just cut differently. */
-function ask() { limit = PAGE; placed = new Map(); load(); }
+function ask() { limit = PAGE; briefLimit = BRIEF; placed = new Map(); load(); }
 
 function ago(iso) {
   if (!iso) return '';
@@ -151,6 +168,77 @@ function row(i) {
   return li;
 }
 
+/** The brief: this week's few as rows, the older ones that crossed a line
+ *  today, and everything else as a count that opens — a folded lane into
+ *  its rows, a folded rule into the list narrowed to it. The rows are the
+ *  list's own, so every action is where it always was. */
+function drawBrief(b) {
+  const sec = el('section', 'group brief');
+  sec.dataset.group = 'brief';
+  const c = b.counts;
+  const h = el('h2', null, 'needs you');
+  h.append(' ', el('span', 'muted', [`${c.fresh} this week`, c.waiting ? `${c.waiting} still waiting` : '', c.yours ? `${c.yours} yours, undated` : ''].filter(Boolean).join(' · ')));
+  const ol = el('ol', 'rows');
+  ol.replaceChildren(...b.needs.map((i) => { const li = row(i); if (i.new) li.classList.add('fresh'); return li; }));
+  if (!b.needs.length) ol.append(el('li', 'empty', c.needs ? 'nothing new this week' : 'nothing needs you'));
+  if (b.more) {
+    const li = el('li', 'empty');
+    // A door until the brief is as long as the server will make it; past
+    // that, the number, and the list is where the rest are.
+    if (briefLimit < BRIEF_MAX) {
+      const more = el('button', 'more', `and ${b.more} more from this week — show them`); more.type = 'button';
+      more.onclick = () => { briefLimit = Math.min(BRIEF_MAX, briefLimit + 10); load(); };
+      li.append(more);
+    } else li.textContent = `and ${b.more} more from this week — the list has them`;
+    ol.append(li);
+  }
+  sec.append(h, ol);
+  if (b.aging.length) {
+    const h3 = el('h3', 'lane', 'slipping');
+    h3.append(' ', el('span', 'muted', 'crossed a line today — said once, then not until the next'));
+    const al = el('ol', 'rows');
+    al.replaceChildren(...b.aging.map((i) => { const li = row(i); li.querySelector('.why')?.prepend(el('span', 'mark', `${i.mark} d waiting`)); return li; }));
+    sec.append(h3, al);
+  }
+  // A lane that is folded is a count until it is opened, and stays open
+  // across the minute's redraw.
+  const lane = (key, title, t) => {
+    if (!t.n) return;
+    const d = el('details', 'lane'); d.dataset.lane = key;
+    if (openLanes.has(key)) d.open = true;
+    d.ontoggle = () => { if (d.open) openLanes.add(key); else openLanes.delete(key); };
+    const sum = el('summary', null, title);
+    sum.append(' ', el('b', null, String(t.n)), t.oldest_days != null ? el('span', 'muted', ` — the oldest ${t.oldest_days} d`) : '');
+    const rows = el('ol', 'rows');
+    rows.replaceChildren(...t.items.map(row));
+    if (t.n > t.items.length) rows.append(el('li', 'empty', `and ${t.n - t.items.length} more — the list has them`));
+    d.append(sum, rows);
+    sec.append(d);
+  };
+  lane('waiting', 'still waiting on you', b.waiting);
+  lane('yours', 'yours, no date', b.yours);
+  if (b.folded.length) {
+    const p = el('p', 'folds');
+    p.append(el('span', 'muted', 'folded away '));
+    for (const g of b.folded) {
+      // A rule's count is the list narrowed to that rule; "other" is
+      // several rules and has no one question to ask.
+      const chip = el(g.rule ? 'button' : 'span', 'fold');
+      chip.append(el('b', null, String(g.n)), ` ${g.label}`);
+      if (g.rule) { chip.type = 'button'; chip.title = `the list, only ${g.label}${g.sources?.length ? ` (${g.sources.join(', ')})` : ''}`; chip.onclick = () => setNarrow('rule', g.rule); }
+      else if (g.rules) chip.title = g.rules.map((r) => String(r || 'unruled').replace(/_/g, ' ')).join(', ');
+      p.append(chip);
+    }
+    sec.append(p);
+  }
+  for (const s of b.sources) sec.append(el('p', 'stopped', `${s.name} ${s.since ? `has not been read since ${at(s.since)}` : 'has never been read'}${s.error ? ` — ${s.error}` : ''}`));
+  const all = el('a', 'all', `everything — ${c.open} open, in rank order`); all.href = '/?view=all';
+  const foot = el('p', 'folds'); foot.append(all);
+  sec.append(foot);
+  return sec;
+}
+const openLanes = new Set();
+
 async function act(li, item, action, until, choice) {
   li.classList.add('busy');
   try {
@@ -196,16 +284,22 @@ let limit = PAGE;
 async function load() {
   const gen = ++generation;
   try {
-    const g0 = group(), n0 = narrow();
-    const qs = new URLSearchParams({ limit: String(limit), ...(g0 ? { group: g0 } : {}), ...n0 });
-    const [lists, health] = await Promise.all([fetch(`/api/lists?${qs}`).then((r) => r.json()), fetch('/healthz').then((r) => r.json())]);
+    const g0 = group(), n0 = narrow(), inList = listView();
+    // The brief still asks the lists for one row: the counts by tier and by
+    // state in the masthead are that answer's, in either view.
+    const qs = new URLSearchParams(inList ? { limit: String(limit), ...(g0 ? { group: g0 } : {}), ...n0 } : { limit: '1' });
+    const [lists, health, today] = await Promise.all([fetch(`/api/lists?${qs}`).then((r) => r.json()), fetch('/healthz').then((r) => r.json()), inList ? null : fetch(`/api/brief?limit=${briefLimit}`).then((r) => r.json())]);
     if (gen !== generation) return;
     const main = $('#main');
     for (const old of main.querySelectorAll('.group')) old.remove();
+    document.body.dataset.view = inList ? 'list' : 'brief';
+    for (const [id, on] of [['#nav-brief', !inList], ['#nav-list', inList]]) { if (on) $(id).setAttribute('aria-current', 'page'); else $(id).removeAttribute('aria-current'); }
+    if (!inList) main.append(drawBrief(today));
     const now = new Map();
     const totals = { queue: 0, snoozed: 0, later: 0 };
     for (const g of lists.groups) {
       totals[g.key.split(':')[0]] += g.items.length + g.more;
+      if (!inList) continue;   // the brief drew itself; this pass is only the counts
       // A row has moved when what sits above it changed — not when it
       // slid up a slot because something above it left. That is the row
       // that lands under a stationary cursor, and the one to flash.
@@ -245,7 +339,7 @@ async function load() {
     $('.controls').classList.toggle('narrowed', Object.keys(n0).length > 0);
     for (const [k, v] of Object.entries(n0)) {
       if (k === 'tier' || k === 'q') continue;
-      const b = el('button', 'chip', `${k === 'repo' ? '' : k + ' '}${v}`); b.type = 'button'; b.title = `stop narrowing by ${k}`;
+      const b = el('button', 'chip', `${k === 'repo' ? '' : k + ' '}${k === 'rule' ? v.replace(/_/g, ' ') : v}`); b.type = 'button'; b.title = `stop narrowing by ${k}`;
       b.append(el('span', 'x', '×'));
       b.onclick = () => setNarrow(k, null);
       chips.append(b);
@@ -305,7 +399,8 @@ $('#group').onchange = (e) => {
   const v = e.target.value;
   try { localStorage.setItem('triage.group', v); } catch {}
   const u = new URL(location.href);
-  if (v) u.searchParams.set('group', v); else u.searchParams.delete('group');
+  // Grouping is a question about the list, so it opens the list.
+  if (v) u.searchParams.set('group', v); else { u.searchParams.delete('group'); u.searchParams.set('view', 'all'); }
   history.replaceState(null, '', u);
   load();
 };
@@ -313,14 +408,16 @@ $('#group').onchange = (e) => {
 let typing;
 $('#q').oninput = (e) => { clearTimeout(typing); typing = setTimeout(() => setNarrow('q', e.target.value.trim()), 250); };
 $('#q').onkeydown = (e) => { if (e.key === 'Escape') { e.target.value = ''; clearTimeout(typing); setNarrow('q', null); e.target.blur(); } if (e.key === 'Enter') { clearTimeout(typing); setNarrow('q', e.target.value.trim()); e.target.blur(); } };
-$('#clear').onclick = () => { clearTimeout(typing); const u = new URL(location.href); for (const k of FILTERS) u.searchParams.delete(k); history.replaceState(null, '', u); ask(); };
+// Clearing a narrowing leaves you in the list you were narrowing.
+$('#clear').onclick = () => { clearTimeout(typing); const u = new URL(location.href); for (const k of FILTERS) u.searchParams.delete(k); u.searchParams.set('view', 'all'); history.replaceState(null, '', u); ask(); };
 
 // A cursor for the keyboard: j and k walk the rows, and the act keys act
 // on the row under it. It is an item id, so a redraw finds the same row;
 // when that row has gone, the row now in its place is the one you are
 // looking at, so the cursor stays put by position.
 let cursor = null, cursorAt = 0;
-const rows = () => [...document.querySelectorAll('.row')];
+// Only the rows on show: one inside a folded lane is not under any cursor.
+const rows = () => [...document.querySelectorAll('.row')].filter((r) => r.offsetParent !== null);
 function place(id) {
   const all = rows();
   let li = all.find((r) => Number(r.dataset.id) === id) || (id != null ? all[Math.min(cursorAt, all.length - 1)] : null);

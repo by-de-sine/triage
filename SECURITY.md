@@ -40,12 +40,17 @@ file, not the process:
   — so put it behind a proxy that authenticates before you put it on a
   hostname ([deploying](docs/deploy.md)). The API never returns a token.
 - **What leaves the box** is one HTTP POST per interrupt to the webhook you
-  configured, or a Socket Mode connection the Slack app opens outbound.
-  The message carries the item's title, link and the rule that fired, and
-  the one line that says why — a comment's first line, a meeting's
-  location and guests; the generic shape also carries the item's data and
-  the event's body cut at 600 characters, because the endpoint is yours
-  to render. That is private work, so it goes only to the endpoint you
+  configured, and one a day for [the brief](docs/interrupts.md#the-brief)
+  on a day it has something to say — or a Socket Mode connection the Slack
+  app opens outbound. An interrupt carries the item's title, link and the
+  rule that fired, and the one line that says why — a comment's first
+  line, a meeting's location and guests; the generic shape also carries
+  the item's data and the event's body cut at 600 characters, because the
+  endpoint is yours to render. The brief carries the title, link and
+  reason of at most eight items, counts of the rest, and the names of
+  sources that have stopped reading; its generic shape carries the brief
+  as `GET /api/brief` gives it, up to a hundred titles in each folded
+  lane. That is private work, so it goes only to the endpoint you
   named, over https unless the endpoint is loopback, and never follows a
   redirect. Nothing from your `.env` is ever in it. Logs name a feed's
   host, never its URL, and never a token.

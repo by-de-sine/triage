@@ -3,18 +3,25 @@
 Your queue, ranked. Triage reads the places work waits for you — GitHub
 notifications, GitLab todos, your calendar, and a few optional sources —
 into one SQLite store, decides with plain rules how much each thing needs
-you, and shows everything as one ordered list. The few things that cannot
-wait (someone replied to you, asked for your review, a meeting starts in
-fifteen minutes) reach you in Slack within a minute.
+you, and opens on a brief: the few things that need you, and everything
+else as counts. The ones that cannot wait (someone replied to you, asked
+for your review, a meeting starts in fifteen minutes) reach you in Slack
+within a minute; the rest of what is yours is said once a day, a few at a
+time.
 
-![The list: every open item in rank order, each with Open, Done, Snooze, Later and Mute](docs/images/list.png)
+![The brief: the few items that need you, each with its actions, and the rest as counts that open](docs/images/brief.png)
 
 - **Deterministic.** Rules, not a model. Every verdict is logged with the
   rule that made it, so you can always ask why something is where it is —
   or why it did or did not interrupt you.
-- **Quiet by default.** Only a short list of rules interrupts; everything
-  else waits in the list. What interrupts is yours to change, per source
-  and per project.
+- **Nothing to sort first.** The brief is short without you pressing
+  anything: what a source has finished is closed for you (a merged pull
+  request, a completed task), news is folded into counts, and an old thing
+  you have not got to is said again when it has waited a week, two, a
+  month — not daily. The whole list is one press away.
+- **Quiet by default.** Only a short list of rules interrupts, and the
+  brief is one message on a day there is something to say. What interrupts
+  is yours to change, per source and per project.
 - **One process.** Node ≥ 24, built-in `node:sqlite`, no build, no
   container, nothing else to run.
 
@@ -66,8 +73,8 @@ What triage holds, and what it does with it, is in
 
 ## Documentation
 
-- [Using the list](docs/using.md) — the page, acting on items, reports
-- [Interrupts](docs/interrupts.md) — what reaches Slack, and making it yours
+- [Using the list](docs/using.md) — the brief, the list, acting on items, reports
+- [Interrupts](docs/interrupts.md) — what reaches Slack, the daily brief, and making it yours
 - [Ranking](docs/ranking.md) — tiers and the order
 - [Configuration](docs/configuration.md) · [HTTP API](docs/api.md) · [Deploying](docs/deploy.md)
 - [Architecture](docs/architecture.md) — the four seams and the store

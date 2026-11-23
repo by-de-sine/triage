@@ -9,7 +9,8 @@ export function fakeApi(routes, { pollInterval = 60, lastModified = 'Mon, 01 Sep
     calls.push(url);
     const u = new URL(url);
     const path = u.pathname + (u.search ? '?' + [...u.searchParams].filter(([k]) => k !== 'per_page').map(([k, v]) => `${k}=${v}`).join('&') : '');
-    const hdr = new Headers({ 'x-ratelimit-remaining': '4000', 'x-poll-interval': String(pollInterval) });
+    // `routes.rateRemaining`: what is left of the hour's rate, as GitHub says it on every answer.
+    const hdr = new Headers({ 'x-ratelimit-remaining': String(routes.rateRemaining ?? 4000), 'x-poll-interval': String(pollInterval) });
     if (u.pathname === '/notifications') {
       if (routes.pages?.[url]) {
         // routes.chain: every page links to the next, so a cap is what ends the walk.

@@ -4,8 +4,8 @@ Start with the [README](../README.md) for what triage is and how to run it.
 
 **Using it**
 
-- [Using the list](using.md) — the page, acting on items, the reports
-- [Interrupts](interrupts.md) — what reaches Slack, the webhook shapes, the Slack app, and making it yours
+- [Using the list](using.md) — the brief, the list, acting on items, the reports
+- [Interrupts](interrupts.md) — what reaches Slack, the daily brief, the webhook shapes, the Slack app, and making it yours
 - [Ranking](ranking.md) — tiers, the three terms, the backfill
 - [Configuration](configuration.md) — the `.env`, and where each variable is documented
 - [HTTP API](api.md)
