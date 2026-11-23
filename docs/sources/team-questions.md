@@ -40,7 +40,7 @@ Open **http://127.0.0.1:3317** if the process runs on your computer. For a remot
 
 `TRIAGE_QUESTIONS_PROJECT=OWNER/NUMBER` enables the source. `TRIAGE_QUESTIONS=off` disables it, and `TRIAGE_QUESTIONS=fake` runs it with sample data. The source uses `GITHUB_TOKEN` or the account signed in through GitHub CLI. It runs independently of the GitHub notifications source.
 
-Triage places assigned quizzes in the recipient's queue under the `question_assigned` rule. A new response to the sender's quiz matches `question_reply`, which interrupts by default. On its first successful scan, Triage indexes existing replies quietly. Reuse the same SQLite database across restarts to receive replies submitted while Triage was offline.
+Triage places assigned quizzes in the recipient's queue under the `question_assigned` rule. A new response to the sender's quiz matches `question_reply`, which interrupts by default. On its first successful scan, Triage indexes existing replies quietly. Reuse the same SQLite database across restarts to catch replies submitted while Triage was offline. Slack delivery follows the configured age limit for interrupts.
 
 To get Slack alerts for new assignments, enable Slack delivery on the recipient's instance and allow `questions:question_assigned`. If `TRIAGE_INTERRUPT` is unset, use `TRIAGE_INTERRUPT=+questions:question_assigned` to add the rule to the defaults. If you already use a custom rule list, add `questions:question_assigned` in the same style as that list. The alert links to the GitHub draft. Open **Answer questions** in Triage to fill it out. [Interrupt settings](../interrupts.md)
 

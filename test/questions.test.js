@@ -89,6 +89,7 @@ test('a response survives delayed GitHub visibility and alerts the offline sende
   assert.match(drafts[1].body, /Note: Use the export preset\./);
   const response = parseResponse(drafts[1]);
   assert.equal(response.answers.filename.text, 'team.csv');
+  drafts[1].createdAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const unrelated = await api.createDraft({ title: 'Another member’s response', body: appendPayload('', {
     ...response, submissionId: randomUUID(),
   }) });
@@ -101,6 +102,7 @@ test('a response survives delayed GitHub visibility and alerts the offline sende
   assert.equal(result.delivered, 1, result.decisions[0]?.note);
   assert.equal(result.decisions[0].rule, 'question_reply');
   assert.equal(delivered[0].item.url, first.receipt.url);
+  assert.equal(delivered[0].event.ts, drafts[1].createdAt);
   assert.equal((await sender.run('questions')).delivered, 0);
   const newSender = new Store();
   t.after(() => newSender.close());

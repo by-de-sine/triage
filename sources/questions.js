@@ -37,14 +37,15 @@ export default {
       if (knownReplies.has(key)) continue;
       knownReplies.add(key);
       if (!sameConnection) continue;
+      const submittedAt = draft.createdAt || nowIso;
       batches.push({
         item: {
           key, kind: 'question_reply', title: `Answers: ${original.draft.title}`, url: draft.url,
           repo: scope, actors: [draft.creator], my_role: 'authored',
-          last_activity: draft.createdAt || nowIso, last_seen: nowIso,
+          last_activity: submittedAt, last_seen: nowIso,
           data: { project: project.id, questionId: response.questionId, submissionId: response.submissionId },
         },
-        events: [{ key, kind: 'question_reply', ts: nowIso, actor: draft.creator, url: draft.url,
+        events: [{ key, kind: 'question_reply', ts: submittedAt, actor: draft.creator, url: draft.url,
           data: { submittedAt: draft.createdAt || null } }],
       });
     }
