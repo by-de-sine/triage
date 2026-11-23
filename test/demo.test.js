@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,4 +118,18 @@ test('the demo with both forges off still boots, its items filed under alice', a
   for (const s of ['calendar', 'ha']) assert.equal((await fetch(`${base}/api/sources/${s}/run`, { method: 'POST' })).status, 200, s);
   assert.deepEqual((await get('/api/sources')).sources.map((s) => s.name).sort(), ['calendar', 'crm', 'ha', 'ledger', 'questions']);
   assert.ok((await get('/api/items')).items.length > 0, 'the items are alice\'s, so the page shows them');
+});
+
+test('an unavailable Questions identity leaves other sources running unless Questions is required', async (t) => {
+  const github = createServer((_req, res) => { res.writeHead(503); res.end(); });
+  await new Promise((resolve, reject) => github.once('error', reject).listen(0, '127.0.0.1', resolve));
+  t.after(() => github.close());
+  const env = {
+    TRIAGE_DEMO: '0', TRIAGE_DB: ':memory:', TRIAGE_GITHUB: 'fake', TRIAGE_SLACK: 'off',
+    TRIAGE_GITHUB_URL: `http://127.0.0.1:${github.address().port}`, GITHUB_TOKEN: 'test',
+    TRIAGE_QUESTIONS_PROJECT: 'example/1',
+  };
+  const { get } = await boot(t, env);
+  assert.deepEqual((await get('/api/sources')).sources.map(({ name }) => name), ['github']);
+  await assert.rejects(boot(t, { ...env, TRIAGE_QUESTIONS: 'on' }), /questions: off.*HTTP 503/);
 });

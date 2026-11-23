@@ -88,9 +88,16 @@ async function register(name, source, c, api, note = '') {
 }
 await forge('github', github, cfg.github, GitHubApi, githubToken, { tokensDir: cfg.github.tokensDir }, async () => (await import('./test/fake-github.js')).demoGithub());
 await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken, {}, async () => (await import('./test/fake-gitlab.js')).demoGitlab());
-const questionsApi = await questionsSource(cfg.questions, cfg.github, log);
+let questionsApi;
+try {
+  questionsApi = await questionsSource(cfg.questions, cfg.github, log);
+  if (questionsApi) identity.questions = await questionsApi.whoami();
+} catch (error) {
+  log(`questions: off — ${error.message}`);
+  if (cfg.questions.mode === 'on') process.exit(1);
+  questionsApi = null;
+}
 if (questionsApi) {
-  identity.questions = await questionsApi.whoami();
   sources.push(questions);
   rules.questions = questionRules;
   extras.questions = { api: questionsApi };
