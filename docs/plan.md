@@ -1783,3 +1783,8 @@ owner's box was a one-commit rewrite of this tree (2026-09-20, no remote),
 read as the design source for the four ports and never merged from. It is
 archived beside triage's own backups, and this paragraph is the record of
 what it was.
+
+
+## Team questions in an organization Project
+
+A quiz and its response each occupy a draft item in one GitHub Project. The source polls the Project because GitHub does not notify a user about a draft assignment or mention. The action path accepts a completed form, rechecks its assignment and revision, then creates the response under the recipient's GitHub identity. The source acknowledges the submission before Triage marks the local question handled. The sender's next poll can interrupt on the new response. See [team questions](sources/team-questions.md) for setup and the two-account acceptance test.

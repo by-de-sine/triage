@@ -32,6 +32,7 @@ its canned world from `test/`. Variables are on each source's page:
 | Source | Turns on with | Page |
 |---|---|---|
 | GitHub | a token — `GITHUB_TOKEN`, or what `gh auth token` holds | [github.md](sources/github.md#configuration) |
+| Team questions | `TRIAGE_QUESTIONS_PROJECT` set to `OWNER/NUMBER` | [team-questions.md](sources/team-questions.md) |
 | GitLab | a token — `GITLAB_TOKEN`, or what `glab auth token` holds | [gitlab.md](sources/gitlab.md#configuration) |
 | Calendar | `TRIAGE_CALENDAR_URL` or `TRIAGE_CALENDAR_FILE` (or Google credentials) | [calendar.md](sources/calendar.md#configuration) |
 | Ledger | `TRIAGE_LEDGER` | [ledger.md](sources/ledger.md#configuration) |
