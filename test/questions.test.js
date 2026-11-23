@@ -159,6 +159,26 @@ test('GitHub request rejections are retryable and execution errors remain ambigu
   }
 });
 
+test('a stale submission does not clear a newer question’s held notification', async (t) => {
+  const api = demoQuestions();
+  const store = new Store();
+  t.after(() => store.close());
+  await runner(store, 'alice', api).run('questions');
+  const [item] = store.items();
+  const reflected = [];
+  const act = createActor({
+    store,
+    deliver: { async reflect(result) { reflected.push(result); } },
+    submissions: { async questions() {
+      store.upsertItem({ ...item, data: { ...item.data, revision: 'newer' } });
+      return { url: 'https://example.com/receipt' };
+    } },
+  });
+  await act({ id: item.id, action: 'submit', revision: item.data.revision, submissionId: randomUUID(), answers: {} });
+  assert.equal(store.item(item.id).state, 'open');
+  assert.deepEqual(reflected, []);
+});
+
 test('the Projects reader ignores unrelated and unsupported drafts, including across pages', async () => {
   const payload = { kind: 'question', sendId: 'send-1', recipient: 'alice', form };
   const body = appendPayload(form.summary, payload);
