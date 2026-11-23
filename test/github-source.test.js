@@ -2,6 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import github, { itemKey } from '../sources/github.js';
 import { fakeApi, notification, pull, issue, comment, reviewComment, review } from './fake-github.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { SlackDelivery } from '../deliver/slack.js';
+import { webhookClient } from '../deliver/notify.js';
+import { fakeWebhook } from './fake-webhook.js';
 
 const ME = 'alice';
 
@@ -115,6 +121,7 @@ test('a review request for me is an event, and a merge is a state event', async 
   rt['/notifications'] = [notification({ id: 5, repo: 'o/r', number: 5, title: 'Review me', reason: 'review_requested', updated_at: '2026-09-02T00:00:00Z' }),
     notification({ id: 6, repo: 'o/r', number: 6, title: 'Merged', reason: 'state_change', updated_at: '2026-09-02T00:00:00Z' })];
   rt['/repos/o/r/pulls/5'] = pull({ repo: 'o/r', number: 5, title: 'Review me', author: 'ann', created_at: '2026-09-01T00:00:00Z', requested_reviewers: [ME] });
+  rt['/repos/o/r/issues/5/events'] = [requestEvent(500, '2026-09-02T00:00:00Z')];
   rt['/repos/o/r/pulls/6'] = pull({ repo: 'o/r', number: 6, title: 'Merged', author: ME, created_at: '2026-09-01T00:00:00Z', state: 'closed', merged_at: '2026-09-02T00:00:00Z', closed_at: '2026-09-02T00:00:00Z' });
   for (const n of [5, 6]) { rt[`/repos/o/r/issues/${n}/comments`] = []; rt[`/repos/o/r/pulls/${n}/comments`] = []; rt[`/repos/o/r/pulls/${n}/reviews`] = []; }
   const r = await github.poll({ api: fakeApi(rt), cursor: null, me: ME });
@@ -124,6 +131,246 @@ test('a review request for me is an event, and a merge is a state event', async 
   const b = r.batches[1];
   assert.equal(b.item.data.state, 'merged');
   assert.ok(b.events.some((e) => e.kind === 'state' && e.data.state === 'merged'));
+});
+
+function requestEvent(id, created_at, reviewer = ME, requester = 'ann') {
+  return { id, event: 'review_requested', created_at, actor: { login: requester }, review_requester: { login: requester }, requested_reviewer: { login: reviewer } };
+}
+
+function reviewRoutes(events = [requestEvent(500, '2026-09-02T02:59:00Z')]) {
+  return {
+    '/notifications': [notification({ id: 5, repo: 'o/r', number: 5, title: 'Review me', reason: 'review_requested', updated_at: '2026-09-02T03:00:00Z' })],
+    '/repos/o/r/pulls/5': pull({ repo: 'o/r', number: 5, title: 'Review me', author: 'bob', created_at: '2026-09-01T00:00:00Z', requested_reviewers: [ME] }),
+    '/repos/o/r/issues/5/events': events,
+    '/repos/o/r/issues/5/comments': [],
+    '/repos/o/r/pulls/5/comments': [],
+    '/repos/o/r/pulls/5/reviews': [],
+  };
+}
+
+function moveReview(rt, ts) {
+  rt.lastModified = new Date(ts).toUTCString();
+  rt['/notifications'][0].updated_at = ts;
+}
+
+test('one actual review request sends one webhook across updates, flushes, restart and cursor loss; a later request sends one more', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'triage-review-'));
+  const file = path.join(dir, 'store.db');
+  let store = new Store(file);
+  t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const hook = fakeWebhook();
+  const rt = reviewRoutes();
+  let now = new Date('2026-09-02T03:00:00Z');
+  let delivery;
+  const runner = () => {
+    delivery = new SlackDelivery(store, { mode: 'webhook', webhookUrl: hook.url, client: webhookClient(hook.url, { fetch: hook.fetch }), quiet: '', tz: 'UTC', now: () => now });
+    return new Runner(store, [github], { user: ME, rules: { github: rules }, deliver: delivery, extras: { github: { api: fakeApi(rt) } }, now: () => now });
+  };
+  let r = runner();
+  assert.equal((await r.run('github')).ok, true);
+  assert.equal(hook.posts.length, 1);
+  for (const minutes of [1, 5, 11, 30]) {
+    now = new Date(Date.parse('2026-09-02T03:00:00Z') + minutes * 60_000);
+    moveReview(rt, now.toISOString());
+    assert.equal((await r.run('github')).ok, true);
+    await delivery.flush();
+    assert.equal(hook.posts.length, 1, `no duplicate after ${minutes} minutes`);
+  }
+  assert.equal(store.heldDeliveries().length, 0);
+  assert.match(hook.posts[0].text, /ann asked for your review/);
+  store.close();
+  store = new Store(file);
+  r = runner();
+  now = new Date('2026-09-02T04:00:00Z');
+  moveReview(rt, now.toISOString());
+  await r.run('github');
+  assert.equal(hook.posts.length, 1, 'restart retains request identity');
+  store.setCursor('github', null);
+  r = runner();
+  await r.run('github');
+  assert.equal(hook.posts.length, 1, 'persistent event keys survive a lost cursor');
+  rt['/repos/o/r/issues/5/events'].push(requestEvent(501, '2026-09-02T04:14:00Z'));
+  now = new Date('2026-09-02T04:15:00Z');
+  moveReview(rt, now.toISOString());
+  await r.run('github');
+  assert.equal(hook.posts.length, 2, 'a distinct request sends again');
+  assert.equal(store.events(store.items()[0].id).filter(e => e.kind === 'review_request').length, 2);
+});
+
+test('request events use stable IDs, actual timestamps and requesters, and filter other reviewers', async () => {
+  const rt = reviewRoutes([requestEvent(500, '2026-09-02T02:00:00Z', 'ALICE', 'carol'), requestEvent(501, '2026-09-02T02:01:00Z', 'other')]);
+  rt['/notifications'][0].reason = 'mention';
+  const first = await github.poll({ api: fakeApi(rt), cursor: null, me: ME });
+  const e = first.batches[0].events.filter(e => e.kind === 'review_request');
+  assert.equal(e.length, 1);
+  assert.equal(e[0].key, 'github:review_request:500');
+  assert.equal(e[0].ts, '2026-09-02T02:00:00Z');
+  assert.equal(e[0].actor, 'carol');
+  moveReview(rt, '2026-09-02T04:00:00Z');
+  const next = await github.poll({ api: fakeApi(rt), cursor: first.cursor, me: ME });
+  assert.equal(next.batches[0].events.find(e => e.kind === 'review_request').key, e[0].key);
+  assert.equal(next.cursor.threads['5'].review_requests_since, null);
+});
+
+test('legacy cursors suppress existing requests and preserve the fixed boundary for later requests', async () => {
+  const rt = reviewRoutes();
+  const cursor = { last_modified: 'Tue, 01 Sep 2026 00:00:00 GMT', threads: { '5': { updated_at: '2026-09-02T03:00:00Z', seen: '2026-09-02T03:00:00Z', key: 'o/r#5' } } };
+  moveReview(rt, '2026-09-02T03:15:00Z');
+  const first = await github.poll({ api: fakeApi(rt), cursor, me: ME, now: new Date('2026-09-02T03:15:00Z') });
+  assert.equal(first.batches[0].events.some(e => e.kind === 'review_request'), false);
+  assert.equal(first.cursor.threads['5'].review_requests_since, cursor.threads['5'].updated_at);
+  rt['/repos/o/r/issues/5/events'].push(requestEvent(501, '2026-09-02T03:14:00Z'));
+  moveReview(rt, '2026-09-02T03:30:00Z');
+  const second = await github.poll({ api: fakeApi(rt), cursor: first.cursor, me: ME, now: new Date('2026-09-02T03:30:00Z') });
+  assert.deepEqual(second.batches[0].events.filter(e => e.kind === 'review_request').map(e => e.key), ['github:review_request:501']);
+  assert.equal(second.cursor.threads['5'].review_requests_since, cursor.threads['5'].updated_at);
+});
+
+test('a pending reviewer without a real request event never synthesizes a request', async () => {
+  const r = await github.poll({ api: fakeApi(reviewRoutes([])), cursor: null, me: ME });
+  assert.equal(r.batches[0].events.some(e => e.kind === 'review_request'), false);
+});
+
+test('a failed request read preserves both checkpoints and is retried without another inbox change', async () => {
+  const rt = reviewRoutes();
+  delete rt['/repos/o/r/issues/5/events'];
+  const api = fakeApi(rt);
+  const first = await github.poll({ api, cursor: null, me: ME });
+  assert.equal(first.batches.length, 0);
+  assert.equal(first.cursor.threads['5'], undefined);
+  assert.equal(first.cursor.last_modified, null);
+  rt['/repos/o/r/issues/5/events'] = [requestEvent(500, '2026-09-02T02:59:00Z')];
+  const next = await github.poll({ api, cursor: first.cursor, me: ME });
+  assert.equal(next.batches[0].events.filter(e => e.kind === 'review_request').length, 1);
+});
+
+test('a failed read after a long stop retains the legacy review boundary for retry', async () => {
+  const rt = reviewRoutes();
+  const cursor = { last_modified: null, threads: { '5': { updated_at: '2026-09-02T03:00:00Z', seen: '2026-09-02T03:00:00Z', key: 'o/r#5' } } };
+  moveReview(rt, '2026-11-02T03:15:00Z');
+  delete rt['/repos/o/r/issues/5/events'];
+  const first = await github.poll({ api: fakeApi(rt), cursor, me: ME, now: new Date('2026-11-02T03:15:00Z') });
+  assert.deepEqual(first.cursor.threads['5'], cursor.threads['5']);
+  rt['/repos/o/r/issues/5/events'] = [requestEvent(500, '2026-09-02T02:59:00Z')];
+  const retry = await github.poll({ api: fakeApi(rt), cursor: first.cursor, me: ME, now: new Date('2026-11-02T03:16:00Z') });
+  assert.equal(retry.batches[0].events.some(e => e.kind === 'review_request'), false);
+});
+
+test('request-event pagination is followed and a capped scan retains both checkpoints and continuation state', async () => {
+  const rt = reviewRoutes([]);
+  const firstUrl = 'https://api.github.com/repos/o/r/issues/5/events?per_page=100';
+  const secondUrl = 'https://api.github.com/repos/o/r/issues/5/events?page=2';
+  rt.links = { [firstUrl]: secondUrl };
+  rt['/repos/o/r/issues/5/events?page=2'] = [requestEvent(500, '2026-09-02T02:59:00Z')];
+  const first = await github.poll({ api: fakeApi(rt), cursor: null, me: ME });
+  assert.equal(first.batches[0].events.find(e => e.kind === 'review_request').key, 'github:review_request:500');
+  moveReview(rt, '2026-09-02T03:15:00Z');
+  rt.links[secondUrl] = secondUrl;
+  const failed = await github.poll({ api: fakeApi(rt), cursor: first.cursor, me: ME });
+  assert.equal(failed.batches.length, 1);
+  assert.equal(failed.cursor.threads['5'].updated_at, first.cursor.threads['5'].updated_at);
+  assert.equal(failed.cursor.threads['5'].review_request_next, secondUrl);
+  assert.equal(failed.cursor.last_modified, first.cursor.last_modified);
+  delete rt.links[secondUrl];
+  const retry = await github.poll({ api: fakeApi(rt), cursor: failed.cursor, me: ME });
+  assert.equal(retry.batches.length, 1);
+  assert.equal(retry.cursor.threads['5'].review_request_next, undefined);
+});
+
+test('a long request scan ingests mentions, resumes after restart and continuation failures, and delivers the request once', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'triage-review-pages-'));
+  const file = path.join(dir, 'store.db');
+  let store = new Store(file);
+  t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const rt = reviewRoutes([]);
+  rt['/repos/o/r/issues/5/comments'] = [comment(900, 'carol', '2026-09-02T02:58:00Z', '@alice look at this', 'o/r', 5)];
+  rt.links = {};
+  let previous = 'https://api.github.com/repos/o/r/issues/5/events?per_page=100';
+  for (let page = 2; page <= 22; page++) {
+    const url = `https://api.github.com/repos/o/r/issues/5/events?page=${page}`;
+    rt.links[previous] = url;
+    rt[`/repos/o/r/issues/5/events?page=${page}`] = Array.from({ length: 100 }, () => ({ event: 'labeled' }));
+    previous = url;
+  }
+  rt['/repos/o/r/issues/5/events?page=22'] = [requestEvent(500, '2026-09-02T02:59:00Z')];
+  const hook = fakeWebhook();
+  let now = new Date('2026-09-02T03:00:00Z');
+  const boot = () => new Runner(store, [github], {
+    user: ME, rules: { github: rules }, extras: { github: { api: fakeApi(rt) } }, now: () => now,
+    deliver: new SlackDelivery(store, { mode: 'webhook', webhookUrl: hook.url, client: webhookClient(hook.url, { fetch: hook.fetch }), quiet: '', now: () => now }),
+  });
+  let runner = boot();
+  await runner.run('github');
+  assert.equal(hook.posts.length, 1);
+  assert.match(hook.posts[0].text, /carol mentioned you/);
+  const partial = store.cursor('github');
+  assert.equal(partial.threads['5'].updated_at, null);
+  assert.equal(partial.threads['5'].review_requests_since, null);
+  assert.match(partial.threads['5'].review_request_next, /page=21$/);
+  assert.equal(partial.last_modified, null);
+  store.close();
+  store = new Store(file);
+  runner = boot();
+  const page21 = rt['/repos/o/r/issues/5/events?page=21'];
+  rt['/repos/o/r/issues/5/events?page=21'] = () => { throw new Error('temporary continuation failure'); };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await runner.run('github');
+    assert.deepEqual(store.cursor('github'), partial);
+    assert.equal(hook.posts.length, 1);
+  }
+  rt['/repos/o/r/issues/5/events?page=21'] = page21;
+  now = new Date('2026-09-02T03:15:00Z');
+  moveReview(rt, now.toISOString());
+  await runner.run('github');
+  assert.equal(hook.posts.length, 2);
+  assert.match(hook.posts[1].text, /ann asked for your review/);
+  assert.equal(store.cursor('github').threads['5'].review_request_next, undefined);
+  assert.equal(store.cursor('github').threads['5'].updated_at, now.toISOString());
+  now = new Date('2026-09-02T03:30:00Z');
+  moveReview(rt, now.toISOString());
+  await runner.run('github');
+  assert.equal(hook.posts.length, 2);
+});
+
+test('legacy requests do not send again through delivery, while a later request still notifies', async (t) => {
+  const store = new Store();
+  t.after(() => store.close());
+  store.setCursor('github', { last_modified: null, threads: { '5': { updated_at: '2026-09-02T03:00:00Z', seen: '2026-09-02T03:00:00Z', key: 'o/r#5' } } });
+  const rt = reviewRoutes();
+  const hook = fakeWebhook();
+  let now = new Date('2026-09-02T03:15:00Z');
+  moveReview(rt, now.toISOString());
+  const delivery = new SlackDelivery(store, { mode: 'webhook', webhookUrl: hook.url, client: webhookClient(hook.url, { fetch: hook.fetch }), quiet: '', tz: 'UTC', now: () => now });
+  const runner = new Runner(store, [github], { user: ME, rules: { github: rules }, deliver: delivery, extras: { github: { api: fakeApi(rt) } }, now: () => now });
+  await runner.run('github');
+  await delivery.flush();
+  assert.equal(hook.posts.length, 0);
+  rt['/repos/o/r/issues/5/events'].push(requestEvent(501, '2026-09-02T03:16:00Z'));
+  now = new Date('2026-09-02T03:30:00Z');
+  moveReview(rt, now.toISOString());
+  await runner.run('github');
+  assert.equal(hook.posts.length, 1);
+});
+
+test('an old request with a fresh notification is not delivered, and a bot requester is not attributed to the PR author', async (t) => {
+  for (const [name, event] of [
+    ['old', requestEvent(500, '2026-08-30T00:00:00Z')],
+    ['bot', requestEvent(500, '2026-09-02T02:59:00Z', ME, 'dependabot[bot]')],
+  ]) {
+    await t.test(name, async () => {
+      const store = new Store();
+      try {
+        const hook = fakeWebhook();
+        const now = () => new Date('2026-09-02T03:00:00Z');
+        const delivery = new SlackDelivery(store, { mode: 'webhook', webhookUrl: hook.url, client: webhookClient(hook.url, { fetch: hook.fetch }), quiet: '', now });
+        const runner = new Runner(store, [github], { user: ME, rules: { github: rules }, deliver: delivery, extras: { github: { api: fakeApi(reviewRoutes([event])) } }, now });
+        await runner.run('github');
+        assert.equal(hook.posts.length, 0);
+        if (name === 'old') assert.match(store.decisions()[0].note, /event is .* old/);
+        else assert.equal(store.decisions().some(d => d.rule === 'review_requested'), false);
+      } finally { store.close(); }
+    });
+  }
 });
 
 test('a thread that fails to fetch is logged and left for the next poll', async () => {

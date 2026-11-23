@@ -18,6 +18,11 @@ interrupts. Every decision row says what happened to it — `sent`, `held`,
 or `not delivered: <rule> does not interrupt (<the statement that said
 so>); it is in the list`.
 
+GitHub review-request alerts use the actual request event ID. Updates to
+the same pending review do not generate another alert, regardless of the
+coalescing window. A new explicit request has a new identity and may
+notify again. See [GitHub](sources/github.md) for upgrade behavior.
+
 ## Guards
 
 | | |

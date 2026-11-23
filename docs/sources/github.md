@@ -11,6 +11,28 @@ it fetches the subject and — for issues and pull requests — the comments,
 review comments and reviews since it last looked. Unread threads only,
 unless `TRIAGE_GITHUB_ALL=1`.
 
+For a changed pull request where you are a pending reviewer, triage also
+reads `GET /repos/:owner/:repo/issues/:number/events`. A review request is
+the actual `review_requested` event for your login, keyed by its GitHub
+event ID and attributed to its requester. Commits, comments, bot activity,
+and polling do not create another request. An explicit later re-request
+has its own ID and can notify again. Event IDs persist in the store, so
+restarts and a lost polling cursor do not replay requests already read.
+
+Request-event reads follow up to twenty pages per poll, saving the next
+page to resume longer histories on later polls. Comments and reviews keep
+flowing while the request scan is incomplete. Request IDs already read
+can be ingested safely; the thread checkpoint and inbox Last-Modified
+advance only after the scan finishes. A failed read preserves progress
+for retry. The usual delivery age guard uses the request's actual time
+when it is the triggering event.
+
+On upgrade from timestamp-based requests, each existing thread keeps its
+previous notification timestamp as a fixed boundary. Requests at or
+before that boundary are not regenerated; later requests still notify.
+No configuration or manual migration is needed. A synthetic notification
+already queued by the old code may still flush once after upgrade.
+
 **Open issues as state** (optional). For each repository in
 `TRIAGE_GITHUB_ISSUES`, every open issue is read whole every
 `TRIAGE_ISSUES_EVERY_MIN` — oldest-updated first, at most ten pages of a
