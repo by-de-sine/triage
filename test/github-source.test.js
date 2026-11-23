@@ -244,6 +244,18 @@ test('a failed request read preserves both checkpoints and is retried without an
   assert.equal(next.batches[0].events.filter(e => e.kind === 'review_request').length, 1);
 });
 
+test('a failed read after a long stop retains the legacy review boundary for retry', async () => {
+  const rt = reviewRoutes();
+  const cursor = { last_modified: null, threads: { '5': { updated_at: '2026-09-02T03:00:00Z', seen: '2026-09-02T03:00:00Z', key: 'o/r#5' } } };
+  moveReview(rt, '2026-11-02T03:15:00Z');
+  delete rt['/repos/o/r/issues/5/events'];
+  const first = await github.poll({ api: fakeApi(rt), cursor, me: ME, now: new Date('2026-11-02T03:15:00Z') });
+  assert.deepEqual(first.cursor.threads['5'], cursor.threads['5']);
+  rt['/repos/o/r/issues/5/events'] = [requestEvent(500, '2026-09-02T02:59:00Z')];
+  const retry = await github.poll({ api: fakeApi(rt), cursor: first.cursor, me: ME, now: new Date('2026-11-02T03:16:00Z') });
+  assert.equal(retry.batches[0].events.some(e => e.kind === 'review_request'), false);
+});
+
 test('request-event pagination is followed and an incomplete read is retried without advancing either checkpoint', async () => {
   const rt = reviewRoutes([]);
   const firstUrl = 'https://api.github.com/repos/o/r/issues/5/events?per_page=100';

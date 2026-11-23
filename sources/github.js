@@ -183,7 +183,7 @@ async function inbox({ api, prev, me, now, log, all = false, governed = new Set(
       log(`${n.repository.full_name} ${n.subject.type} ${n.subject.title}: ${e.message}`);
     }
   }
-  for (const [id, t] of Object.entries(threads)) if (now - Date.parse(t.seen || 0) > CURSOR_TTL_MS) delete threads[id];
+  if (complete) for (const [id, t] of Object.entries(threads)) if (now - Date.parse(t.seen || 0) > CURSOR_TTL_MS) delete threads[id];
   const lm = res.headers.get('last-modified');
   return { batches, cursor: { last_modified: complete ? (lm || prev.last_modified) : prev.last_modified, threads }, every, status: `${list.length} unread, ${fetched} read, ${skipped} unchanged` };
 }
