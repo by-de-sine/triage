@@ -54,3 +54,5 @@ To get Slack alerts for new assignments, enable Slack delivery on the recipient'
 If the question does not appear, check the configured Project number, your GitHub login, the assignment and the source's last successful poll in `/api/sources`. A Project permission failure calls for checking both the account's Project access and its token's permissions.
 
 If GitHub fails to confirm a submission, use **Submit answers** again to look for the receipt. Triage keeps your in-progress answers in the browser tab and checks GitHub for the previous submission before it can create another response.
+
+All answers and notes share the GitHub draft body limit. If Triage reports that the answers are too long, shorten them and submit again.

@@ -45,6 +45,29 @@ test('healthz reports the commit the deploy told it, and null when there is none
   } finally { server.close(); store.close(); }
 });
 
+test('only question items accept questionnaire-sized action bodies', async () => {
+  const store = new Store();
+  const question = store.upsertItem({ user: ME, source: 'questions', key: 'question', kind: 'question', title: 'Question' }).item;
+  const pull = store.upsertItem({ user: ME, source: 'github', key: 'pull', kind: 'pull', title: 'Pull' }).item;
+  const server = http.createServer(createApp({
+    store, user: ME, act: async ({ answers }) => ({ answers }),
+  }));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const answers = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
+      `question-${index}`, { text: '文'.repeat(2000), note: 'é'.repeat(2000) },
+    ]));
+    const post = (id) => fetch(`${base}/api/items/${id}/act`, { method: 'POST', body: JSON.stringify({ action: 'submit', answers }) });
+    const submission = await post(question.id);
+    assert.equal(submission.status, 200);
+    assert.deepEqual((await submission.json()).answers, answers);
+    const oversize = await post(pull.id);
+    assert.equal(oversize.status, 413);
+    await oversize.json();
+  } finally { server.close(); store.close(); }
+});
+
 test('the API answers healthz, runs a source, lists items and decisions', async () => {
   const { server, get, post, patches, base } = await boot();
   try {
