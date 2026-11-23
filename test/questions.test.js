@@ -144,6 +144,19 @@ test('changed assignments and denied writes keep the question open', async (t) =
   assert.equal((await api.listDrafts()).length, 2);
 });
 
+test('GitHub request rejections are retryable and execution errors remain ambiguous', async () => {
+  const cases = [
+    [{ data: null, errors: [{ type: 'RATE_LIMITED', message: 'Rate limit exceeded' }] }, true],
+    [{ errors: [{ message: 'Invalid input' }] }, true],
+    [{ data: null, errors: [{ path: ['addProjectV2DraftIssue'], message: 'Execution failed' }] }, false],
+    [{ data: { addProjectV2DraftIssue: { projectItem: null } }, errors: [{ message: 'Partial error' }] }, false],
+  ];
+  for (const [result, definite] of cases) {
+    const api = new GitHubProjectsApi({ fetch: async () => Response.json(result) });
+    await assert.rejects(api.graphql('mutation QuestionsCreateDraft'), { definite });
+  }
+});
+
 test('the Projects reader ignores unrelated and unsupported drafts, including across pages', async () => {
   const payload = { kind: 'question', sendId: 'send-1', recipient: 'alice', form };
   const body = appendPayload(form.summary, payload);

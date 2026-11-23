@@ -65,7 +65,7 @@ export function createQuestionSubmitter({ api, login }) {
     } catch (error) {
       if (error.definite) {
         clearWrite();
-        throw failure(502, 'GitHub rejected the response. Check that your account has write access to this Project.');
+        throw failure(502, 'GitHub rejected the response. Check your Project write access and GitHub API limits before retrying.');
       }
     }
 
