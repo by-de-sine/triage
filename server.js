@@ -27,6 +27,10 @@ import { HaApi } from './lib/ha-api.js';
 import crm from './sources/crm.js';
 import crmRules from './rules/crm.js';
 import { TwentyApi } from './lib/twenty-api.js';
+import questions from './sources/questions.js';
+import questionRules from './rules/questions.js';
+import { GitHubProjectsApi } from './lib/github-projects.js';
+import { createQuestionSubmitter } from './sources/question-submission.js';
 import { existsSync } from 'node:fs';
 import { isMe } from './lib/util.js';
 
@@ -84,13 +88,21 @@ async function register(name, source, c, api, note = '') {
 }
 await forge('github', github, cfg.github, GitHubApi, githubToken, { tokensDir: cfg.github.tokensDir }, async () => (await import('./test/fake-github.js')).demoGithub());
 await forge('gitlab', gitlab, cfg.gitlab, GitLabApi, gitlabToken, {}, async () => (await import('./test/fake-gitlab.js')).demoGitlab());
+const questionsApi = await questionsSource(cfg.questions, cfg.github, log);
+if (questionsApi) {
+  identity.questions = await questionsApi.whoami();
+  sources.push(questions);
+  rules.questions = questionRules;
+  extras.questions = { api: questionsApi };
+  log(`questions: ${questionsApi.owner}/${questionsApi.number} as ${identity.questions}${cfg.questions.mode === 'fake' ? ' (fake)' : ''}`);
+}
 // The one person the items belong to: `items.user`, which scopes every
 // read. Whoever the store already files items under, so that adding a
 // forge later never re-keys a queue; on an empty store, the GitHub login
 // when GitHub is on, else the GitLab username. The demo's is the fixtures'
 // own, always: with both forges off there is no login to take, and a store
 // TRIAGE_DB names must not have the canned day filed under its owner.
-const user = cfg.demo ? 'alice' : store.firstUser() ?? identity.github ?? identity.gitlab ?? null;
+const user = cfg.demo ? 'alice' : store.firstUser() ?? identity.github ?? identity.gitlab ?? identity.questions ?? null;
 if (user && Object.values(identity).length && !Object.values(identity).some((me) => isMe(user, me))) log(`items belong to ${user} (the store's), which is none of this boot's identities (${Object.entries(identity).map(([k, v]) => `${k}: ${v}`).join(', ')}) — set TRIAGE_DB to start a queue of your own`);
 
 // M3: the second source, read from an ICS feed (plan §16, G4) or from
@@ -163,7 +175,8 @@ const marks = {
   ha: hass ? markDone(hass) : async () => 'nothing ticked off: the Home Assistant source is off (TRIAGE_HA), so there is nothing to write to',
   ...Object.fromEntries(sources.filter((s) => s.mark).map((s) => [s.name, (item) => s.mark(item, { ...(extras[s.name] || {}), me: identity[s.name] ?? user })])),
 };
-const act = createActor({ store, marks, deliver, rank, log });
+const submissions = questionsApi ? { questions: createQuestionSubmitter({ api: questionsApi, login: identity.questions }) } : {};
+const act = createActor({ store, marks, submissions, deliver, rank, log });
 await deliver.start({ act });
 // M5's bootstrap, once, bounded: the backlog predates every feature the
 // ranker wants and nothing else will ever compute one for it (plan §11.8).
@@ -190,6 +203,15 @@ const app = createApp({ store, runner, deliver, act, rank, rules, user, identity
 const server = http.createServer(app);
 // The port as bound, not as asked: `TRIAGE_PORT=0` takes any free one.
 server.listen(cfg.port, cfg.host, () => { log(`listening on http://${cfg.host}:${server.address().port}`); runner.start(); });
+
+async function questionsSource(c, githubConfig, log) {
+  if (c.mode === 'off' || (!c.mode && !c.owner)) { log('questions: off'); return null; }
+  if (c.mode === 'fake') return (await import('./test/fake-questions.js')).demoQuestions();
+  if (!c.owner) throw new Error('TRIAGE_QUESTIONS=on requires TRIAGE_QUESTIONS_PROJECT');
+  const token = githubConfig.token || await githubToken(process.env);
+  if (!token) throw new Error('TRIAGE_QUESTIONS_PROJECT requires GITHUB_TOKEN or a token from gh auth token');
+  return new GitHubProjectsApi({ base: githubConfig.base, token, owner: c.owner, number: c.number });
+}
 
 /** How the calendar is read — `{ feed }` or `{ api }` — or null when it
  *  should not be registered. Says out loud which it is, because "the

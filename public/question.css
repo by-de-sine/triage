@@ -1,0 +1,23 @@
+.question-page { max-width: 760px; gap: 14px; }
+.question-page [hidden] { display: none; }
+.question-page h1 { font-size: clamp(28px, 5vw, 42px); line-height: 1.1; }
+.question-page p { margin: 8px 0; }
+.question-page fieldset {
+  min-width: 0; margin: 0; padding: 14px 18px;
+  border: 1px solid var(--rule); border-radius: var(--r); background: var(--surface);
+}
+.question-page fieldset + fieldset { margin-top: 18px; }
+.question-page legend { padding: 0 5px; font-weight: 700; }
+.question-page pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); }
+.question-choice, .question-field { display: flex; gap: 8px; margin: 6px 0; }
+.question-choice { align-items: baseline; }
+.question-choice small { display: block; color: var(--ink-3); }
+.question-field { flex-direction: column; }
+.question-field input, .question-field textarea {
+  box-sizing: border-box; width: 100%; padding: 7px 9px; border-radius: 6px;
+  border: 1px solid var(--rule-2); background: var(--paper); color: inherit; font: inherit;
+}
+.question-field textarea { resize: vertical; }
+.question-actions { justify-content: flex-start; margin-top: 14px; }
+.question-actions button, .question-actions a { padding: 8px 15px; }
+.question-actions button:disabled { opacity: .6; cursor: wait; }

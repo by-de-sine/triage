@@ -124,7 +124,7 @@ test('no preferences file is the normal case, and costs nothing', () => {
   const c = cfg();
   assert.equal(c.prefs, null);
   assert.equal(c.prefsFile, null);
-  assert.deepEqual(c.slack.interrupts.set, { github: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'], gitlab: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'], calendar: ['starts_in_15_min', 'new_invitation'], crm: ['handed_to_me', 'changed_on_my_task', 'crm_unread'] });
+  assert.deepEqual(c.slack.interrupts.set, { github: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'], gitlab: ['reply_to_my_review_comment', 'reply_to_my_comment', 'direct_mention', 'review_requested', 'new_pull_request'], calendar: ['starts_in_15_min', 'new_invitation'], crm: ['handed_to_me', 'changed_on_my_task', 'crm_unread'], questions: ['question_reply'] });
   assert.deepEqual(c.rank.prefer, []);
 });
 
