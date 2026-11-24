@@ -130,8 +130,13 @@ function row(i) {
   // One dominant action per row, and the rest quiet — every one still one
   // press, none behind a hover or an overflow. Join for a meeting, Open for
   // anything with a page, Ack for an ack, Done for the rest.
-  const primary = i.join ? 'join' : i.url ? 'open' : i.state === 'open' && i.ask === 'ack' && !i.choices?.length ? 'ack' : 'done';
+  const primary = i.kind === 'question' ? 'question' : i.join ? 'join' : i.url ? 'open' : i.state === 'open' && i.ask === 'ack' && !i.choices?.length ? 'ack' : 'done';
   const out = (cls, text, href) => { const a = el('a', cls, text); a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.title = 'opens in a new tab'; return a; };
+  if (primary === 'question') {
+    const answer = el('a', 'open primary', 'Answer questions');
+    answer.href = `/question.html?id=${i.id}`;
+    acts.append(answer);
+  }
   if (i.join) { const j = out(`open join${primary === 'join' ? ' primary' : ''}`, 'Join', i.join); acts.append(j); }
   if (i.url) { const open = out(`open${primary === 'open' ? ' primary' : ''}`, 'Open', i.url); acts.append(open); }
   // The ask, as buttons: a choice each for a confirm, one Ack for an ack.
@@ -142,6 +147,7 @@ function row(i) {
     const b = el('button', `choice${primary === 'ack' ? ' primary' : ''}`, 'Ack'); b.onclick = () => act(li, i, 'done'); acts.append(b);
   }
   for (const [action, until, label] of ACTS) {
+    if (action === 'done' && primary === 'question') continue;
     const b = el('button', `${action}${action === 'done' && primary === 'done' ? ' primary' : ''}`, label);
     b.onclick = () => act(li, i, action, until);
     acts.append(b);
@@ -350,7 +356,7 @@ document.addEventListener('keydown', (e) => {
   // a keyboard user expanding the rank must not also press Done.
   if (e.key === 'Enter' && e.target.matches('button, a')) return;
   if (e.key === 'Enter' || e.key === 'o') li.querySelector('.acts .primary')?.click();
-  if (e.key === 'd') act(li, i, 'done');
+  if (e.key === 'd' && i.kind !== 'question') act(li, i, 'done');
   if (e.key === 's') act(li, i, 'snooze', '1h');
   if (e.key === 'S') act(li, i, 'snooze', '1d');
   if (e.key === 'l') act(li, i, 'later');

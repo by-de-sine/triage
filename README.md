@@ -58,6 +58,7 @@ What triage holds, and what it does with it, is in
 | Source | Reads | Interrupts on |
 |---|---|---|
 | [GitHub](docs/sources/github.md) | notifications; optionally the open issues of named repositories | replies to you, mentions, review requests, new pull requests |
+| [Team questions](docs/sources/team-questions.md) | assigned quizzes and replies in an organization GitHub Project | a recipient submits answers to your quiz |
 | [GitLab](docs/sources/gitlab.md) | todos, your merge requests and issues; optionally open issues | the same |
 | [Calendar](docs/sources/calendar.md) | an ICS feed (or Google Calendar) | 15 minutes before a meeting; an unanswered invitation |
 | [Ledger](docs/sources/ledger.md) | a markdown queue file agents write their asks to | nothing |

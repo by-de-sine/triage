@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +16,8 @@ import { SlackDelivery } from '../deliver/slack.js';
 import { Store } from '../lib/store.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const SOURCES = ['github', 'gitlab', 'calendar', 'ledger', 'ha', 'crm'];
-const modes = (c) => ({ github: c.github.mode, gitlab: c.gitlab.mode, calendar: c.calendar.mode, ledger: c.ledger.mode, ha: c.ha.mode, crm: c.crm.mode });
+const SOURCES = ['github', 'gitlab', 'calendar', 'ledger', 'ha', 'crm', 'questions'];
+const modes = (c) => ({ github: c.github.mode, gitlab: c.gitlab.mode, calendar: c.calendar.mode, ledger: c.ledger.mode, ha: c.ha.mode, crm: c.crm.mode, questions: c.questions.mode });
 const allFake = Object.fromEntries(SOURCES.map((s) => [s, 'fake']));
 
 test('the demo resolves to every fake, a store in memory, and delivery off', () => {
@@ -33,7 +34,7 @@ test('the demo resolves to every fake, a store in memory, and delivery off', () 
   // Not the demo: nothing changes.
   const plain = loadConfig({ TRIAGE_ENV: '/nonexistent/triage.env' });
   assert.equal(plain.demo, false);
-  assert.deepEqual(modes(plain), { github: null, gitlab: null, calendar: null, ledger: 'off', ha: null, crm: null });
+  assert.deepEqual(modes(plain), { github: null, gitlab: null, calendar: null, ledger: 'off', ha: null, crm: null, questions: null });
   assert.throws(() => loadConfig({ TRIAGE_DEMO: 'maybe' }), /TRIAGE_DEMO must be 1 or 0/);
   assert.equal(loadConfig({ TRIAGE_DEMO: '0', TRIAGE_ENV: '/nonexistent/triage.env' }).demo, false);
 });
@@ -115,6 +116,20 @@ test('TRIAGE_DEMO=1 boots server.js on every fake: items from every source, noth
 test('the demo with both forges off still boots, its items filed under alice', async (t) => {
   const { base, get } = await boot(t, { TRIAGE_GITHUB: 'off', TRIAGE_GITLAB: 'off' });
   for (const s of ['calendar', 'ha']) assert.equal((await fetch(`${base}/api/sources/${s}/run`, { method: 'POST' })).status, 200, s);
-  assert.deepEqual((await get('/api/sources')).sources.map((s) => s.name).sort(), ['calendar', 'crm', 'ha', 'ledger']);
+  assert.deepEqual((await get('/api/sources')).sources.map((s) => s.name).sort(), ['calendar', 'crm', 'ha', 'ledger', 'questions']);
   assert.ok((await get('/api/items')).items.length > 0, 'the items are alice\'s, so the page shows them');
+});
+
+test('an unavailable Questions identity leaves other sources running unless Questions is required', async (t) => {
+  const github = createServer((_req, res) => { res.writeHead(503); res.end(); });
+  await new Promise((resolve, reject) => github.once('error', reject).listen(0, '127.0.0.1', resolve));
+  t.after(() => github.close());
+  const env = {
+    TRIAGE_DEMO: '0', TRIAGE_DB: ':memory:', TRIAGE_GITHUB: 'fake', TRIAGE_SLACK: 'off',
+    TRIAGE_GITHUB_URL: `http://127.0.0.1:${github.address().port}`, GITHUB_TOKEN: 'test',
+    TRIAGE_QUESTIONS_PROJECT: 'example/1',
+  };
+  const { get } = await boot(t, env);
+  assert.deepEqual((await get('/api/sources')).sources.map(({ name }) => name), ['github']);
+  await assert.rejects(boot(t, { ...env, TRIAGE_QUESTIONS: 'on' }), /questions: off.*HTTP 503/);
 });

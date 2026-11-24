@@ -13,6 +13,7 @@ Start with the [README](../README.md) for what triage is and how to run it.
 **Sources**
 
 - [GitHub](sources/github.md) — including the thread rules both forges share
+- [Team questions](sources/team-questions.md) — answering a quiz in an organization Project
 - [GitLab](sources/gitlab.md)
 - [Calendar](sources/calendar.md)
 - [Ledger](sources/ledger.md) — and the ask grammar for agents

@@ -69,6 +69,7 @@ export const INTERRUPTS = {
   // happened". `+crm:changed_what_i_wrote` and `+crm:changed_by_other` are
   // the two steps back toward the first call, for whoever wants them.
   crm: ['handed_to_me', 'changed_on_my_task', 'crm_unread'],
+  questions: ['question_reply'],
 };
 
 /** Rules this set does not get to refuse, because something else already

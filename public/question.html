@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Team questions · triage</title>
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/question.css">
+<script>
+  try { const theme = localStorage.getItem('triage.theme'); if (theme) document.documentElement.dataset.theme = theme; } catch {}
+</script>
+</head>
+<body>
+<header class="mast"><a class="wordmark" href="/">triage</a><nav class="nav" aria-label="Pages"><a href="/">Back to queue</a></nav></header>
+<main class="question-page">
+  <header>
+    <h1 id="title">Team questions</h1>
+    <p id="sender" class="muted" hidden></p>
+    <p id="summary" hidden></p>
+  </header>
+  <form id="answers" hidden>
+    <div id="questions"></div>
+    <p id="closing" class="muted" hidden></p>
+    <div class="acts question-actions"><button class="primary" type="submit">Submit answers</button></div>
+  </form>
+  <p id="status" role="status" aria-live="polite">Loading questions…</p>
+  <p class="acts question-actions"><a id="receipt" class="primary" hidden>Open response on GitHub</a></p>
+</main>
+<script src="/question.js" type="module"></script>
+</body>
+</html>
